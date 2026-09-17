@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Cutline",
+    "slug": "cutline",
+    "version": "0.1.0",
+    "scheme": "cutline",
+    "platforms": ["ios", "android"],
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "com.cutline.app",
+      "supportsTablet": true,
+      "infoPlist": { "ITSAppUsesNonExemptEncryption": false }
+    },
+    "android": {
+      "package": "com.cutline.app",
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "plugins": ["expo-secure-store"]
+  }
+}

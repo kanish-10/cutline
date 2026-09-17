@@ -1,0 +1,31 @@
+{
+  "name": "cutline",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.3.0 <25"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web,mobile -c blue,green,magenta \"npm run dev -w @cutline/api\" \"npm run dev -w @cutline/web\" \"npm run dev -w @cutline/mobile\"",
+    "dev:api": "npm run dev -w @cutline/api",
+    "dev:web": "npm run dev -w @cutline/web",
+    "dev:mobile": "npm run dev -w @cutline/mobile",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build -w @cutline/shared && npm run build -w @cutline/api && npm run build -w @cutline/web",
+    "db:migrate": "npm run db:migrate -w @cutline/api"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "^24.0.0",
+    "concurrently": "^9.2.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}
