@@ -253,8 +253,9 @@ export function CardDetail({
             </label>
           </div>
           <label>
-            Notes
+            <span id="card-notes-label">Notes</span>
             <textarea
+              aria-labelledby="card-notes-label"
               rows={5}
               value={draft.notes}
               maxLength={LIMITS.notes}

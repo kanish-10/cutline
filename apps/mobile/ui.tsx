@@ -1,8 +1,8 @@
-import { COLORS } from "@cutline/shared";
 import type { ReactNode } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TextInputProps } from "react-native";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
@@ -16,6 +16,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { LAYOUT, RADIUS, SPACE, THEME, TYPE } from "./constants";
+import { errorMessage } from "./form-errors";
 
 export function useAction() {
   const lock = useRef(false);
@@ -38,6 +40,31 @@ export function useAction() {
     }
   }
   return { pending, error, run, clearError: () => setError(null) };
+}
+
+export function useReducedMotion() {
+  const [reduced, setReduced] = useState(true);
+  useEffect(() => {
+    let active = true;
+    let changed = false;
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      (value) => {
+        changed = true;
+        setReduced(value);
+      },
+    );
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((value) => {
+        if (active && !changed) setReduced(value);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+  return reduced;
 }
 
 export function confirmDiscard(dirty: boolean, onConfirm: () => void) {
@@ -76,7 +103,8 @@ export function Button({
         styles.button,
         primary && styles.primary,
         selected && styles.selected,
-        (disabled || pressed) && styles.dim,
+        pressed && styles.pressed,
+        disabled && styles.dim,
       ]}
     >
       <Text
@@ -95,44 +123,64 @@ export function Button({
 export function Field({
   label,
   style,
+  error,
   ...props
-}: TextInputProps & { label: string }) {
+}: TextInputProps & { label: string; error?: string | undefined }) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
-        placeholderTextColor={COLORS.muted}
+        accessibilityHint={error}
+        placeholderTextColor={THEME.muted}
+        selectionColor={THEME.accent}
         {...props}
-        style={[styles.input, props.multiline && styles.multiline, style]}
+        onFocus={(event) => {
+          setFocused(true);
+          props.onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setFocused(false);
+          props.onBlur?.(event);
+        }}
+        style={[
+          styles.input,
+          props.multiline && styles.multiline,
+          focused && styles.focused,
+          Boolean(error) && styles.invalid,
+          style,
+        ]}
       />
+      {error && (
+        <Text accessibilityLiveRegion="polite" style={styles.fieldError}>
+          {error}
+        </Text>
+      )}
     </View>
   );
 }
 
 export function ErrorNotice({ error }: { error: unknown }) {
   if (!error) return null;
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "Something went wrong. Please try again.";
   return (
     <Text
       accessibilityRole="alert"
       accessibilityLiveRegion="assertive"
       style={styles.error}
     >
-      {message}
+      {errorMessage(error)}
     </Text>
   );
 }
 
 export function Loading({ label = "Loading…" }: { label?: string }) {
+  const reduced = useReducedMotion();
   return (
-    <View style={styles.center}>
-      <ActivityIndicator color={COLORS.accent} accessibilityLabel={label} />
+    <View style={styles.center} accessibilityLiveRegion="polite">
+      {!reduced && (
+        <ActivityIndicator color={THEME.accent} accessibilityLabel={label} />
+      )}
       <Text style={styles.muted}>{label}</Text>
     </View>
   );
@@ -156,16 +204,19 @@ export function Sheet({
   children,
   onClose,
   pending,
+  footer,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   pending: boolean;
+  footer?: ReactNode;
 }) {
+  const reduced = useReducedMotion();
   return (
     <Modal
       visible
-      animationType="slide"
+      animationType={reduced ? "none" : "slide"}
       presentationStyle="fullScreen"
       onRequestClose={() => {
         if (!pending) onClose();
@@ -181,11 +232,20 @@ export function Sheet({
               <Button title="Close" onPress={onClose} disabled={pending} />
             </View>
             <ScrollView
+              style={styles.flex}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.content}
+              keyboardDismissMode="on-drag"
+              contentContainerStyle={[styles.content, styles.form]}
             >
               {children}
             </ScrollView>
+            {footer && (
+              <View style={styles.footer}>
+                <View style={[styles.form, styles.footerContent]}>
+                  {footer}
+                </View>
+              </View>
+            )}
           </View>
         </Screen>
       </SafeAreaProvider>
@@ -195,72 +255,118 @@ export function Sheet({
 
 export const styles = StyleSheet.create({
   flex: { flex: 1 },
-  screen: { flex: 1, backgroundColor: COLORS.paper },
-  content: { padding: 20, gap: 16, paddingBottom: 40 },
+  screen: { flex: 1, backgroundColor: THEME.paper },
+  content: { padding: SPACE.xl, gap: SPACE.lg, paddingBottom: SPACE.hero },
+  form: { width: "100%", maxWidth: LAYOUT.form, alignSelf: "center" },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
-    gap: 16,
+    padding: SPACE.xxl,
+    gap: SPACE.lg,
   },
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: SPACE.xl,
+    paddingVertical: SPACE.sm,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: SPACE.md,
   },
-  row: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: SPACE.sm,
+  },
+  inline: { flexDirection: "row", alignItems: "center", gap: SPACE.sm },
   heading: {
-    fontSize: 24,
+    fontSize: TYPE.title,
     fontWeight: "700",
-    color: COLORS.ink,
+    color: THEME.ink,
     flexShrink: 1,
+    letterSpacing: -0.5,
   },
-  hero: { fontSize: 36, fontWeight: "700", color: COLORS.ink },
-  label: { color: COLORS.ink, fontSize: 16, fontWeight: "600" },
-  text: { color: COLORS.ink, fontSize: 16, lineHeight: 23 },
-  muted: { color: COLORS.muted, fontSize: 14, lineHeight: 21 },
-  field: { gap: 6 },
+  hero: {
+    fontSize: TYPE.hero,
+    fontWeight: "700",
+    color: THEME.ink,
+    letterSpacing: -1.2,
+  },
+  eyebrow: {
+    fontSize: TYPE.caption,
+    fontWeight: "700",
+    color: THEME.muted,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+  },
+  label: { color: THEME.ink, fontSize: TYPE.small, fontWeight: "600" },
+  text: { color: THEME.ink, fontSize: TYPE.body, lineHeight: 24 },
+  muted: { color: THEME.muted, fontSize: TYPE.small, lineHeight: 21 },
+  field: { gap: SPACE.sm },
   input: {
     borderWidth: 1,
-    borderColor: COLORS.line,
-    backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 16,
-    color: COLORS.ink,
-    minHeight: 48,
+    borderColor: THEME.line,
+    backgroundColor: THEME.surface,
+    borderRadius: RADIUS.control,
+    padding: SPACE.md,
+    fontSize: TYPE.body,
+    color: THEME.ink,
+    minHeight: LAYOUT.touch,
   },
-  multiline: { minHeight: 100, textAlignVertical: "top" },
+  focused: { borderColor: THEME.accent },
+  invalid: { borderColor: THEME.danger },
+  multiline: { minHeight: LAYOUT.notes, textAlignVertical: "top" },
   button: {
-    minHeight: 44,
-    minWidth: 44,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
+    minHeight: LAYOUT.touch,
+    minWidth: LAYOUT.touch,
+    paddingHorizontal: SPACE.lg,
+    paddingVertical: SPACE.md,
+    borderRadius: RADIUS.control,
     borderWidth: 1,
-    borderColor: COLORS.line,
-    backgroundColor: COLORS.surface,
+    borderColor: THEME.line,
+    backgroundColor: THEME.surface,
     alignItems: "center",
     justifyContent: "center",
   },
-  buttonText: { fontSize: 15, fontWeight: "600", color: COLORS.ink },
-  primary: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
-  primaryText: { color: COLORS.surface },
-  selected: { borderColor: COLORS.accent, borderWidth: 2 },
-  dim: { opacity: 0.5 },
-  danger: { color: COLORS.danger },
-  error: { color: COLORS.danger, fontSize: 15, paddingVertical: 8 },
-  card: {
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: COLORS.surface,
-    borderColor: COLORS.line,
-    borderWidth: 1,
-    gap: 12,
+  buttonText: {
+    fontSize: TYPE.small,
+    fontWeight: "600",
+    color: THEME.ink,
+    textAlign: "center",
   },
-  divider: { height: 1, backgroundColor: COLORS.line, marginVertical: 8 },
+  primary: { backgroundColor: THEME.accent, borderColor: THEME.accent },
+  primaryText: { color: THEME.surface },
+  selected: { borderColor: THEME.accent, backgroundColor: THEME.accentSoft },
+  pressed: { opacity: 0.7 },
+  dim: { opacity: 0.45 },
+  danger: { color: THEME.danger },
+  fieldError: { color: THEME.danger, fontSize: TYPE.small, lineHeight: 21 },
+  error: {
+    color: THEME.danger,
+    fontSize: TYPE.small,
+    lineHeight: 21,
+    padding: SPACE.md,
+    backgroundColor: THEME.dangerSoft,
+    borderRadius: RADIUS.small,
+  },
+  card: {
+    padding: SPACE.lg,
+    borderRadius: RADIUS.card,
+    backgroundColor: THEME.surface,
+    borderColor: THEME.line,
+    borderWidth: 1,
+    gap: SPACE.md,
+  },
+  divider: { height: 1, backgroundColor: THEME.line, marginVertical: SPACE.sm },
+  footer: {
+    backgroundColor: THEME.paper,
+    borderTopColor: THEME.line,
+    borderTopWidth: 1,
+  },
+  footerContent: {
+    paddingHorizontal: SPACE.xl,
+    paddingVertical: SPACE.md,
+    gap: SPACE.sm,
+  },
 });

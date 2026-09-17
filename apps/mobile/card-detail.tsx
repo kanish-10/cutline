@@ -1,4 +1,4 @@
-import type { Card, Stage, UpdateCard } from "@cutline/shared";
+import type { Card, Stage } from "@cutline/shared";
 import {
   ApiError,
   CHECKLISTS,
@@ -10,7 +10,11 @@ import { randomUUID } from "expo-crypto";
 import * as Linking from "expo-linking";
 import { useState } from "react";
 import { Switch, Text, View } from "react-native";
+import { cardChanges, draftOf, parseList } from "./card-draft";
+import { ChecklistRow } from "./checklist-row";
 import { useClients } from "./clients";
+import { THEME } from "./constants";
+import { fieldErrors } from "./form-errors";
 import {
   Button,
   confirmDiscard,
@@ -20,18 +24,6 @@ import {
   styles,
   useAction,
 } from "./ui";
-
-function draftOf(card: Card) {
-  return {
-    title: card.title,
-    notes: card.notes,
-    checklist: card.checklist,
-    tags: card.tags.join(", "),
-    links: card.links.join("\n"),
-    stageId: card.stageId,
-    archived: card.archived,
-  };
-}
 
 export function CardDetail({
   card,
@@ -53,6 +45,7 @@ export function CardDetail({
   const [draft, setDraft] = useState(() => draftOf(card));
   const [newStep, setNewStep] = useState("");
   const action = useAction();
+  const errors = fieldErrors(action.error);
   const dirty =
     JSON.stringify(draft) !== JSON.stringify(draftOf(base)) || Boolean(newStep);
   const conflict =
@@ -77,34 +70,7 @@ export function CardDetail({
         throw new Error(
           "Add your pending checklist step or clear it before saving.",
         );
-      const original = draftOf(base);
-      const input: UpdateCard = { version: base.version };
-      if (draft.title !== original.title) input.title = draft.title;
-      if (draft.notes !== original.notes) input.notes = draft.notes;
-      if (draft.stageId !== original.stageId) input.stageId = draft.stageId;
-      if (draft.archived !== original.archived) input.archived = draft.archived;
-      if (draft.tags !== original.tags)
-        input.tags = [
-          ...new Set(
-            draft.tags
-              .split(",")
-              .map((tag) => tag.trim())
-              .filter(Boolean),
-          ),
-        ];
-      if (draft.links !== original.links)
-        input.links = [
-          ...new Set(
-            draft.links
-              .split("\n")
-              .map((link) => link.trim())
-              .filter(Boolean),
-          ),
-        ];
-      if (
-        JSON.stringify(draft.checklist) !== JSON.stringify(original.checklist)
-      )
-        input.checklist = draft.checklist;
+      const input = cardChanges(base, draft);
       if (!stages.some((stage) => stage.id === draft.stageId))
         throw new Error("Choose an available stage.");
       try {
@@ -122,7 +88,33 @@ export function CardDetail({
   }
 
   return (
-    <Sheet title="Idea details" onClose={close} pending={action.pending}>
+    <Sheet
+      title="Idea details"
+      onClose={close}
+      pending={action.pending}
+      footer={
+        <>
+          <Text accessibilityLiveRegion="polite" style={styles.muted}>
+            {action.pending
+              ? "Saving your changes…"
+              : unavailable
+                ? "Card unavailable · edits not saved"
+                : conflict
+                  ? "Changed elsewhere · review saved copy above"
+                  : dirty
+                    ? "Unsaved changes · save when you’re ready"
+                    : "You’re up to date"}
+          </Text>
+          <ErrorNotice error={action.error} />
+          <Button
+            primary
+            title={action.pending ? "Saving…" : "Save changes"}
+            disabled={disabled || conflict || !dirty}
+            onPress={save}
+          />
+        </>
+      }
+    >
       {unavailable && (
         <ErrorNotice error="This card is no longer available. Close this screen and refresh your board." />
       )}
@@ -162,6 +154,7 @@ export function CardDetail({
       )}
       <Field
         label="Title"
+        error={errors.title}
         value={draft.title}
         onChangeText={(value) => set("title", value)}
         maxLength={LIMITS.title}
@@ -169,6 +162,7 @@ export function CardDetail({
       />
       <Field
         label="Notes"
+        error={errors.notes}
         multiline
         value={draft.notes}
         onChangeText={(value) => set("notes", value)}
@@ -195,52 +189,35 @@ export function CardDetail({
           No steps yet. Add your own or use a stage checklist.
         </Text>
       )}
-      {draft.checklist.map((item, index) => (
-        <View key={item.id} style={styles.card}>
-          <View style={styles.row}>
-            <Switch
-              accessibilityLabel={`Complete step ${index + 1}: ${item.text}`}
-              value={item.done}
-              disabled={disabled}
-              onValueChange={(done) =>
-                set(
-                  "checklist",
-                  draft.checklist.map((entry) =>
-                    entry.id === item.id ? { ...entry, done } : entry,
-                  ),
-                )
-              }
-            />
-            <Text style={styles.muted}>{item.done ? "Done" : "To do"}</Text>
-          </View>
-          <Field
-            label={`Step ${index + 1}`}
-            value={item.text}
-            maxLength={LIMITS.checklistText}
-            editable={!disabled}
-            onChangeText={(text) =>
+      <Text style={styles.muted}>
+        {draft.checklist.filter((item) => item.done).length} of{" "}
+        {draft.checklist.length} complete
+      </Text>
+      <ErrorNotice error={errors.checklist} />
+      <View style={styles.field}>
+        {draft.checklist.map((item, index) => (
+          <ChecklistRow
+            key={item.id}
+            item={item}
+            index={index}
+            disabled={disabled}
+            onChange={(updated) =>
               set(
                 "checklist",
                 draft.checklist.map((entry) =>
-                  entry.id === item.id ? { ...entry, text } : entry,
+                  entry.id === item.id ? updated : entry,
                 ),
               )
             }
-          />
-          <Button
-            title="Remove step"
-            label={`Remove step ${index + 1}`}
-            danger
-            disabled={disabled}
-            onPress={() =>
+            onRemove={() =>
               set(
                 "checklist",
                 draft.checklist.filter((entry) => entry.id !== item.id),
               )
             }
           />
-        </View>
-      ))}
+        ))}
+      </View>
       <Field
         label="New checklist step"
         value={newStep}
@@ -277,6 +254,7 @@ export function CardDetail({
       )}
       <Field
         label={`Tags, separated by commas (up to ${LIMITS.tags})`}
+        error={errors.tags}
         value={draft.tags}
         onChangeText={(value) => set("tags", value)}
         editable={!disabled}
@@ -285,6 +263,7 @@ export function CardDetail({
       />
       <Field
         label={`Links, one http(s) URL per line (up to ${LIMITS.links})`}
+        error={errors.links}
         multiline
         value={draft.links}
         onChangeText={(value) => set("links", value)}
@@ -293,14 +272,7 @@ export function CardDetail({
         autoCorrect={false}
         maxLength={(LIMITS.url + 1) * LIMITS.links}
       />
-      {[
-        ...new Set(
-          draft.links
-            .split("\n")
-            .map((link) => link.trim())
-            .filter(Boolean),
-        ),
-      ].map((link) => (
+      {parseList(draft.links, "\n").map((link) => (
         <Button
           key={link}
           title={`Open ${link}`}
@@ -313,6 +285,7 @@ export function CardDetail({
       <View style={styles.row}>
         <Switch
           accessibilityLabel="Archived"
+          trackColor={{ false: THEME.line, true: THEME.accent }}
           value={draft.archived}
           onValueChange={(value) => set("archived", value)}
           disabled={disabled}
@@ -326,13 +299,6 @@ export function CardDetail({
       <Text style={styles.muted}>
         Changes, including archive and restore, apply when you save.
       </Text>
-      <ErrorNotice error={action.error} />
-      <Button
-        primary
-        title={action.pending ? "Saving…" : "Save changes"}
-        disabled={disabled || conflict || !dirty}
-        onPress={save}
-      />
     </Sheet>
   );
 }

@@ -123,10 +123,27 @@ Run everything before committing; see DEPLOYMENT.md for the production checklist
 | I want to… | Do this |
 |---|---|
 | Add/edit API constants or limits | `packages/shared/src/index.ts` (single source of truth) |
-| Change DB schema | `apps/api/src/schema.ts` + add migration in `apps/api/src/database.ts` |
+| Change DB schema | Edit `apps/api/src/schema.ts`, run `npm run db:generate -w @cutline/api`, review SQL and commit all generated migration assets |
 | Add/modify an endpoint | `apps/api/src/app.ts` (routes) + schema in `packages/shared` |
 | Change stage templates/checklists | `TEMPLATES` / `CHECKLISTS` in `packages/shared/src/index.ts` |
 | Reset the database | stop API, delete `apps/api/cutline.db*`, restart (self-migrates) |
+
+### Database migration workflow
+
+Use Node 24 and npm 11. From the repository root:
+
+```bash
+npm run db:generate -w @cutline/api -- --name=describe_change
+npm run db:check -w @cutline/api
+npm run test -w @cutline/api
+npm run typecheck -w @cutline/api
+npm run lint -w @cutline/api
+npm run db:migrate -w @cutline/api
+```
+
+Edit `apps/api/src/schema.ts` before generating. Commit the generated SQL, snapshots, and journal together under `apps/api/migrations/`. Review generated SQL and test upgrades against a populated backup, not just an empty database. Never change applied migration files or use `drizzle-kit push`. `db:check` validates migration metadata, not whether the live database matches the schema; a second `db:generate` with unchanged schema should report no changes.
+
+`src/migrations.ts` owns migration execution; `database.ts` retains the public `migrate` and `openDatabase` exports. Startup and the CLI use the same runner. Existing exact inline-v1 databases are automatically adopted with data preserved; unknown or partial legacy schemas are refused. See DEPLOYMENT.md for backup, adoption, asset packaging, and table-rebuild limitations. Migration assets must remain beside `dist/` for compiled execution.
 
 ### Editing `packages/shared`
 

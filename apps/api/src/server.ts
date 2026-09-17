@@ -6,7 +6,12 @@ import { migrate, openDatabase } from "./database.js";
 
 const config = loadConfig(process.env);
 const { db, sqlite } = openDatabase(config.DATABASE_URL);
-migrate(sqlite);
+try {
+  migrate(sqlite);
+} catch (error) {
+  sqlite.close();
+  throw error;
+}
 const app = createApp(db, createAuth(db, config), config);
 const server = serve({ fetch: app.fetch, port: config.PORT });
 for (const signal of ["SIGINT", "SIGTERM"] as const)

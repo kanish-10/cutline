@@ -10,15 +10,27 @@ const config = loadConfig({
   BETTER_AUTH_SECRET: "test-secret-32-characters-minimum!!",
 });
 type App = ReturnType<typeof createApp>;
-export async function createTestEnv() {
-  const { db, sqlite } = openDatabase(":memory:");
-  migrate(sqlite);
-  const auth = createAuth(db, config);
-  const { createApp } = await import("./app.js");
-  const app = createApp(db, auth, config);
-  return { app, db, sqlite };
+const databases = new Set<ReturnType<typeof openDatabase>["sqlite"]>();
+export async function createTestEnv(filename = ":memory:") {
+  const { db, sqlite } = openDatabase(filename);
+  try {
+    migrate(sqlite);
+    const auth = createAuth(db, config);
+    const { createApp } = await import("./app.js");
+    const app = createApp(db, auth, config);
+    databases.add(sqlite);
+    return { app, db, sqlite };
+  } catch (error) {
+    sqlite.close();
+    throw error;
+  }
 }
-export function cleanupDatabase() {}
+export function cleanupDatabase() {
+  for (const sqlite of databases) {
+    if (sqlite.open) sqlite.close();
+    databases.delete(sqlite);
+  }
+}
 export async function signUp(
   app: App,
   email: string,

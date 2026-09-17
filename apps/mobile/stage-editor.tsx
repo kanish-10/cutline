@@ -10,6 +10,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Alert, Text, View } from "react-native";
 import { useClients } from "./clients";
+import { RADIUS } from "./constants";
+import { fieldErrors } from "./form-errors";
 import {
   Button,
   confirmDiscard,
@@ -71,6 +73,7 @@ export function StageEditor({
       )}
       <Field
         label="Stage name"
+        error={fieldErrors(action.error).name}
         value={name}
         onChangeText={setName}
         maxLength={LIMITS.stageName}
@@ -84,7 +87,7 @@ export function StageEditor({
             style={{
               borderTopColor: value,
               borderTopWidth: 6,
-              borderRadius: 10,
+              borderRadius: RADIUS.control,
             }}
           >
             <Button

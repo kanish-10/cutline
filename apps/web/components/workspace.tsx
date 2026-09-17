@@ -7,6 +7,7 @@ import { createContext, useContext, useState } from "react";
 import { UI } from "../constants";
 import { AuthScreen } from "./auth-screen";
 import { BoardScreen } from "./board-screen";
+import { Brand } from "./brand";
 
 function clients(apiUrl: string) {
   return {
@@ -74,10 +75,7 @@ function SessionGate() {
   if (session.isPending)
     return (
       <main className="center-state" aria-busy="true">
-        <span className="brand">
-          {APP.name}
-          <span className="brand-dot" />
-        </span>
+        <Brand>{APP.name}</Brand>
         <p>Opening your workspace…</p>
       </main>
     );

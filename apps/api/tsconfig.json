@@ -6,5 +6,5 @@
     "module": "Preserve",
     "moduleResolution": "Bundler"
   },
-  "include": ["src/**/*.ts", "src/**/*.test.ts"]
+  "include": ["src/**/*.ts", "drizzle.config.ts"]
 }

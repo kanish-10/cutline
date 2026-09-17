@@ -3,7 +3,8 @@
 import { APP, credentialsSchema, LIMITS, signupSchema } from "@cutline/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { UI } from "../constants";
+import { AUTH_STEPS, UI } from "../constants";
+import { Brand } from "./brand";
 import { ErrorNotice, useClients } from "./workspace";
 
 export function AuthScreen({
@@ -23,29 +24,38 @@ export function AuthScreen({
   return (
     <main className="auth-shell">
       <section className="auth-story">
-        <a className="brand" href="/">
-          {APP.name}
-          <span className="brand-dot" />
-        </a>
+        <Brand>{APP.name}</Brand>
         <div>
-          <p className="eyebrow">YOUR IDEAS, IN MOTION</p>
+          <p className="eyebrow">A WORKSPACE FOR CREATORS</p>
           <h1>
-            Less managing.
+            Good work
             <br />
-            More making.
+            starts with
+            <br />
+            <em>a little space.</em>
           </h1>
           <p className="story-copy">
-            A little structure for your big ideas. One quiet place to take your
-            work from “what if” to out in the world.
+            Bring your ideas, notes, and next steps together. A considered space
+            to take your work from the first spark to the final cut.
           </p>
+          <ol className="story-steps">
+            {AUTH_STEPS.map((step, index) => (
+              <li key={step.title}>
+                <span aria-hidden="true" className="step-index">
+                  0{index + 1}
+                </span>
+                <div>
+                  <h2>{step.title}</h2>
+                  <p>{step.description}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
         </div>
-        <div className="story-pipeline" aria-hidden="true">
-          <span>Capture</span>
-          <span>→</span>
-          <span>Create</span>
-          <span>→</span>
-          <span>Publish</span>
-        </div>
+        <p className="story-footer">
+          VIDEO <span aria-hidden="true">/</span> PODCASTS{" "}
+          <span aria-hidden="true">/</span> WRITING
+        </p>
       </section>
       <section className="auth-form-wrap">
         <form
@@ -89,12 +99,14 @@ export function AuthScreen({
             }
           }}
         >
-          <p className="eyebrow">YOUR CREATIVE WORKSPACE</p>
-          <h2>{signup ? "Start something good." : "Welcome back."}</h2>
+          <p className="eyebrow">
+            {signup ? "START YOUR WORKSPACE" : "WELCOME BACK"}
+          </p>
+          <h2>{signup ? "Create your account" : "Sign in"}</h2>
           <p className="muted">
             {signup
-              ? "Create an account. Your next idea is waiting."
-              : "Pick up where your inspiration left off."}
+              ? "One account for every board you make."
+              : "Pick up right where you left off."}
           </p>
           <fieldset disabled={pending}>
             {signup && (
@@ -138,11 +150,7 @@ export function AuthScreen({
             </small>
             <ErrorNotice error={error} />
             <button className="primary full" type="submit">
-              {pending
-                ? "Please wait…"
-                : signup
-                  ? "Create your account →"
-                  : "Sign in →"}
+              {pending ? "Signing in…" : signup ? "Create account" : "Sign in"}
             </button>
             <p className="auth-switch">
               {signup ? "Already have an account?" : "New here?"}{" "}

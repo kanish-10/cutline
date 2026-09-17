@@ -9,11 +9,14 @@
     "start": "node --env-file=.env dist/server.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "db:migrate": "tsx --env-file=.env src/migrate.ts"
+    "lint": "biome check .",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
+    "db:migrate": "tsx --env-file-if-exists=.env src/migrate.ts"
   },
   "dependencies": {
-    "@cutline/shared": "*",
     "@better-auth/expo": "1.7.5",
+    "@cutline/shared": "*",
     "@hono/node-server": "^1.19.0",
     "better-auth": "1.7.5",
     "better-sqlite3": "13.0.3",
@@ -23,6 +26,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "drizzle-kit": "0.31.10",
     "tsx": "^4.21.0"
   }
 }

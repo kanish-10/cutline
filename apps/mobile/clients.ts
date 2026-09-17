@@ -3,9 +3,10 @@ import { APP, TIMING } from "@cutline/shared";
 import { createAuthClient } from "better-auth/react";
 import * as SecureStore from "expo-secure-store";
 import { createContext, useContext } from "react";
-import { createMobileApi } from "./api";
+import { apiOrigin, createMobileApi } from "./api";
 
-export function createClients(baseURL: string) {
+export function createClients(value: string) {
+  const baseURL = apiOrigin(value);
   const authClient = createAuthClient({
     baseURL,
     basePath: APP.authPath,

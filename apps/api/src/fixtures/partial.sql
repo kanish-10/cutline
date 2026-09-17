@@ -1,0 +1,3 @@
+CREATE TABLE user (id TEXT PRIMARY KEY NOT NULL);
+CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL);
+INSERT INTO schema_migrations VALUES (1);

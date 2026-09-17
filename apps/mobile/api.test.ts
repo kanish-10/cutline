@@ -1,11 +1,48 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiOrigin, createMobileApi } from "./api";
 
 const origin = "http://localhost:3001";
 
+beforeEach(() => vi.stubGlobal("__DEV__", true));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("mobile API configuration", () => {
+  it.each([
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+    "10.0.2.2",
+    "192.168.1.4",
+    "172.16.0.1",
+    "172.31.255.254",
+  ])("allows local HTTP only during development: %s", (host) => {
+    expect(apiOrigin(`http://${host}:3001`, true)).toBe(`http://${host}:3001`);
+    expect(() => apiOrigin(`http://${host}:3001`, false)).toThrow("HTTPS");
+  });
+  it.each([
+    "example.com",
+    "localhost.example.com",
+    "192.168.1.4.example.com",
+    "172.15.0.1",
+    "172.32.0.1",
+    "169.254.169.254",
+    "0.0.0.0",
+    "8.8.8.8",
+  ])("rejects non-local HTTP even in development: %s", (host) => {
+    expect(() => apiOrigin(`http://${host}`, true)).toThrow("HTTPS");
+  });
+  it("fails closed in release and unknown runtimes before requesting cookies", () => {
+    const cookie = vi.fn();
+    for (const mode of [false, undefined]) {
+      vi.stubGlobal("__DEV__", mode);
+      expect(() => createMobileApi(origin, cookie)).toThrow("HTTPS");
+      expect(apiOrigin("https://api.example.com/")).toBe(
+        "https://api.example.com",
+      );
+    }
+    expect(cookie).not.toHaveBeenCalled();
+  });
+
   it("normalizes origins", () => {
     expect(apiOrigin(`${origin}/`)).toBe(origin);
   });

@@ -1,4 +1,4 @@
-import { APP, COLORS } from "@cutline/shared";
+import { APP } from "@cutline/shared";
 import { useState } from "react";
 import { StatusBar, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -6,6 +6,7 @@ import { apiOrigin } from "./api";
 import { AuthScreen } from "./auth-screen";
 import { Workspace } from "./board-screen";
 import { ClientContext, createClients, useClients } from "./clients";
+import { THEME } from "./constants";
 import { Button, ErrorNotice, Loading, Screen, styles } from "./ui";
 
 export default function App() {
@@ -21,7 +22,7 @@ export default function App() {
   });
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.paper} />
+      <StatusBar barStyle="dark-content" backgroundColor={THEME.paper} />
       {setup.clients ? (
         <ClientContext.Provider value={setup.clients}>
           <SessionGate />

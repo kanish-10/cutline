@@ -1,5 +1,6 @@
 import type { Board, Card } from "@cutline/shared";
 import { describe, expect, it } from "vitest";
+import { isLocalHost } from "./api";
 import { replaceCard, undoInput } from "./board-state";
 
 const card: Card = {
@@ -39,6 +40,35 @@ const board: Board = {
   ],
 };
 const undo = { card, previousStageId: "first", expiresAt: 5000 };
+
+describe("localhost detection", () => {
+  it("accepts loopback and private ranges", () => {
+    for (const host of [
+      "localhost",
+      "[::1]",
+      "127.0.0.1",
+      "10.1.2.3",
+      "192.168.0.7",
+      "172.16.1.1",
+      "172.31.9.9",
+    ])
+      expect(isLocalHost(host)).toBe(true);
+  });
+  it("rejects public, spoofed, and malformed hosts", () => {
+    for (const host of [
+      "example.com",
+      "cutline.local",
+      "192.168.1.4.example.com",
+      "172.15.0.1",
+      "172.32.0.1",
+      "8.8.8.8",
+      "999.1.1.1",
+      "1.2.3",
+      "",
+    ])
+      expect(isLocalHost(host)).toBe(false);
+  });
+});
 
 describe("advance undo", () => {
   it("uses the version returned by the move", () => {
