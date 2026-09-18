@@ -38,30 +38,15 @@ import {
 export function createApp(db: AppDatabase, auth: Auth, config: Config) {
   const app = new Hono<{ Variables: { userId: string } }>();
   app.use("*", secureHeaders());
-  app.use(
-    "*",
-    cors({
-      origin: config.WEB_ORIGIN,
-      credentials: true,
-      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type", "expo-origin", "x-skip-oauth-proxy"],
-    }),
-  );
-  app.use(
-    "*",
-    bodyLimit({
-      maxSize: LIMITS.bodyBytes,
-      onError: (c) => c.json({ error: "Request is too large" }, 413),
-    }),
-  );
+  const allowedOrigins = [config.WEB_ORIGIN, config.EXPO_ORIGIN, "exp://", "https://expo.dev", "https://u.expo.dev"];
+
   app.use("/api/*", async (c, next) => {
     c.header("Cache-Control", "no-store");
     const origin = c.req.header("Origin");
     if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {
       if (
         origin &&
-        origin !== config.WEB_ORIGIN &&
-        origin !== `${"cutline"}://`
+        !allowedOrigins.some((o) => origin === o || origin.startsWith(o))
       )
         throw new HTTPException(403, { message: "Origin not allowed" });
       if (c.req.header("sec-fetch-site") === "cross-site")

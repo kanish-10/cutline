@@ -17,6 +17,7 @@ const envSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
   API_URL: z.url().default("http://localhost:3001"),
   WEB_ORIGIN: z.url().default("http://localhost:3000"),
+  EXPO_ORIGIN: z.url().default("exp://localhost:8081"),
 });
 export function loadConfig(env: NodeJS.ProcessEnv) {
   const config = envSchema.parse(env);
