@@ -1,30 +1,23 @@
 "use client";
 
-import type { BoardSummary, ExportOptions } from "@cutline/shared";
+import type { ExportOptions } from "@cutline/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
   Check,
   ChevronDown,
-  ChevronUp,
   Database,
   Download,
   FileSpreadsheet,
   FileText,
   Loader2,
-  X,
 } from "lucide-react";
 import { useState } from "react";
 import { QueryProvider } from "@/components/query-provider";
 import { api } from "@/lib/api";
 
-interface DateRange {
-  start: string;
-  end: string;
-}
-
 function ExportPageContent() {
-  const queryClient = useQueryClient();
+  const _queryClient = useQueryClient();
   const [options, setOptions] = useState<ExportOptions>({
     format: "json",
     includeArchived: false,
@@ -120,7 +113,10 @@ function ExportPageContent() {
                 key={fmt.value}
                 className={`format-option ${options.format === fmt.value ? "selected" : ""}`}
                 onClick={() =>
-                  setOptions({ ...options, format: fmt.value as any })
+                  setOptions({
+                    ...options,
+                    format: fmt.value as ExportOptions["format"],
+                  })
                 }
               >
                 <fmt.icon className="icon" />

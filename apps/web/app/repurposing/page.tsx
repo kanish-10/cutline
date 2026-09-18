@@ -3,16 +3,7 @@
 import type { RepurposingLink } from "@cutline/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import {
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Edit,
-  Loader2,
-  Plus,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Edit, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { QueryProvider } from "@/components/query-provider";
 import { api } from "@/lib/api";
@@ -213,7 +204,13 @@ function RepurposingPageContent() {
                       onChange={(e) =>
                         updateMutation.mutate({
                           id: item.id,
-                          input: { status: e.target.value as any },
+                          input: {
+                            status: e.target.value as
+                              | "planned"
+                              | "in_progress"
+                              | "published"
+                              | "archived",
+                          },
                         })
                       }
                       className={`status-select status-${item.status}`}
@@ -308,7 +305,15 @@ function RepurposingPageContent() {
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        platform: e.target.value as any,
+                        platform: e.target.value as
+                          | "shorts"
+                          | "reels"
+                          | "tiktok"
+                          | "threads"
+                          | "newsletter"
+                          | "blog"
+                          | "linkedin"
+                          | "custom",
                       })
                     }
                     required
@@ -328,7 +333,11 @@ function RepurposingPageContent() {
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        status: e.target.value as any,
+                        status: e.target.value as
+                          | "planned"
+                          | "in_progress"
+                          | "published"
+                          | "archived",
                       })
                     }
                     required
@@ -418,8 +427,8 @@ function RepurposingSkeleton() {
             </tr>
           </thead>
           <tbody>
-            {[...Array(5)].map((_, i) => (
-              <tr key={i} className="skeleton-row">
+            {[...Array(5)].map((_, i) => ( // biome-ignore lint/correctness/noArrayIndexKey: skeleton rows are static placeholders
+              <tr key={`skeleton-${i}`} className="skeleton-row">
                 <td className="skeleton-cell"></td>
                 <td className="skeleton-cell"></td>
                 <td className="skeleton-cell"></td>

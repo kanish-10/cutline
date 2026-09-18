@@ -23,8 +23,15 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
+    "@tailwindcss/aspect-ratio": "^0.4.2",
+    "@tailwindcss/container-queries": "^0.1.1",
+    "@tailwindcss/forms": "^0.5.11",
+    "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^24.0.0",
+    "autoprefixer": "^10.6.1",
     "concurrently": "^9.2.1",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^4.3.3",
     "typescript": "7.0.2",
     "vitest": "5.0.1"
   }

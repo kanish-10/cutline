@@ -1,10 +1,8 @@
 "use client";
 
-import type { AnalyticsSnapshot } from "@cutline/shared";
 import { useQuery } from "@tanstack/react-query";
-import { format } from "date-fns";
 import { BarChart, Clock, Target, TrendingUp, Trophy, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "@/lib/api";
 
 function DashboardPageContent() {
@@ -81,6 +79,7 @@ function DashboardPageContent() {
         <div className="period-selector">
           {["week", "month", "quarter", "year"].map((p) => (
             <button
+              type="button"
               key={p}
               className={`period-btn ${period === p ? "active" : ""}`}
               onClick={() => setPeriod(p as typeof period)}
@@ -217,7 +216,7 @@ function DashboardSkeleton() {
       </header>
       <section className="stats-grid">
         {[...Array(6)].map((_, i) => (
-          <article key={i} className="stat-card skeleton"></article>
+          <article key={`stat-skeleton-${i}`} className="stat-card skeleton"></article>
         ))}
       </section>
       <section className="charts-grid">

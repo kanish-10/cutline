@@ -1,9 +1,7 @@
 "use client";
 
-import type { BrandDeal } from "@cutline/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useState } from "react";
 import { QueryProvider } from "@/components/query-provider";
 import { api } from "@/lib/api";
 
@@ -18,7 +16,7 @@ function BrandDealsPageContent() {
       <div className="brand-deals-page">
         <header className="page-header">
           <div className="skeleton-text h1"></div>
-          <button className="primary skeleton"></button>
+          <button type="button" className="primary skeleton"></button>
         </header>
       </div>
     );
@@ -33,7 +31,7 @@ function BrandDealsPageContent() {
             Manage sponsorships, contracts, and deliverables
           </p>
         </div>
-        <button className="primary">
+        <button type="button" className="primary">
           <Plus className="icon" /> New Deal
         </button>
       </header>

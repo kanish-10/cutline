@@ -99,7 +99,7 @@ export function useGlobalKeyboardShortcuts(
         return;
       }
 
-      const ctrlOrMeta = MAC ? event.metaKey : event.ctrlKey;
+      const _ctrlOrMeta = MAC ? event.metaKey : event.ctrlKey;
       const key = event.key.toLowerCase();
       const combo = [
         event.ctrlKey && !MAC && "ctrl",
