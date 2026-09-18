@@ -1,6 +1,7 @@
 import { APP } from "@cutline/shared";
 import type { Metadata } from "next";
 import type { CSSProperties, ReactNode } from "react";
+import { ThemeProviderWrapper } from "@/components/theme-provider";
 import { WEB_THEME } from "../constants";
 import "./globals.css";
 
@@ -16,7 +17,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   ) as CSSProperties;
   return (
     <html lang="en" style={theme}>
-      <body>{children}</body>
+      <body>
+        <ThemeProviderWrapper>{children}</ThemeProviderWrapper>
+      </body>
     </html>
   );
 }

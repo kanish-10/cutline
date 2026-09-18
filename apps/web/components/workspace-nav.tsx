@@ -1,4 +1,10 @@
-import { APP, type Board, type SessionUser } from "@cutline/shared";
+import {
+  APP,
+  type Board,
+  type BoardSummary,
+  type SessionUser,
+} from "@cutline/shared";
+import { useTheme } from "@/hooks/useTheme";
 import { CREATOR_OPTIONS } from "../constants";
 import { Brand, Icon } from "./brand";
 
@@ -10,6 +16,11 @@ export function WorkspaceNav({
   busy,
   signingOut,
   onSignOut,
+  boards,
+  boardId,
+  switchingBlocked,
+  onSelectBoard,
+  onCreateBoard,
 }: {
   user: SessionUser;
   board: Board | null | undefined;
@@ -18,7 +29,14 @@ export function WorkspaceNav({
   busy: boolean;
   signingOut: boolean;
   onSignOut: () => void;
+  boards: BoardSummary[];
+  boardId: string | null;
+  switchingBlocked: boolean;
+  onSelectBoard: (id: string) => void;
+  onCreateBoard: () => void;
 }) {
+  const { resolvedTheme, toggleTheme } = useTheme();
+
   return (
     <aside className="workspace-nav">
       <Brand>{APP.name}</Brand>
@@ -34,6 +52,32 @@ export function WorkspaceNav({
               : "Creator studio"}
           </span>
         </div>
+      </div>
+      <div className="board-picker">
+        <label>
+          Your boards
+          <select
+            value={boardId ?? ""}
+            disabled={switchingBlocked || !boards.length}
+            onChange={(event) => onSelectBoard(event.target.value)}
+          >
+            {!boards.length && <option value="">Your first board</option>}
+            {boards.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {boards.length > 0 && (
+          <button
+            type="button"
+            disabled={switchingBlocked}
+            onClick={onCreateBoard}
+          >
+            <Icon name="plus" /> New board
+          </button>
+        )}
       </div>
       <nav aria-label="Workspace">
         <p className="nav-label">Workspace</p>
@@ -76,6 +120,15 @@ export function WorkspaceNav({
           <strong>{user.name}</strong>
           <span title={user.email}>{user.email}</span>
         </div>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={toggleTheme}
+          aria-label={`Switch to ${resolvedTheme === "dark" ? "light" : "dark"} mode`}
+          title={`Theme: ${resolvedTheme.charAt(0).toUpperCase() + resolvedTheme.slice(1)} (⌘⇧D to toggle)`}
+        >
+          <Icon name={resolvedTheme === "dark" ? "sun" : "moon"} />
+        </button>
         <button
           type="button"
           className="icon-button"

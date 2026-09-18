@@ -90,7 +90,10 @@ export const checklistItemSchema = z
   })
   .strict();
 export const createBoardSchema = z
-  .object({ creatorType: z.enum(CREATOR_TYPES) })
+  .object({
+    creatorType: z.enum(CREATOR_TYPES),
+    name: z.string().trim().min(1).max(80).optional(),
+  })
   .strict();
 export const createCardSchema = z.object({ title: titleSchema }).strict();
 export const updateCardSchema = z
@@ -152,8 +155,17 @@ export interface Card {
   updatedAt: string;
   publishedAt: string | null;
 }
+export interface BoardSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  creatorType: CreatorType;
+  cardCount: number;
+}
 export interface Board {
   id: string;
+  name: string;
+  createdAt: string;
   creatorType: CreatorType;
   stages: Stage[];
   cards: Card[];
@@ -168,25 +180,133 @@ export interface Session {
 }
 export interface ApiErrorBody {
   error: string;
+  code?: string;
 }
+export const ERROR_CODES = {
+  cardLimit: "CARD_LIMIT_REACHED",
+  boardNotEmpty: "BOARD_NOT_EMPTY",
+} as const;
 export const QUERY_KEYS = {
   board: ["board"] as const,
+  boards: ["boards"] as const,
+  boardById: (id: string) => ["board", id] as const,
   session: ["session"] as const,
+  dashboard: ["dashboard"] as const,
+  repurposing: ["repurposing"] as const,
+  brandDeals: ["brandDeals"] as const,
+  exports: ["export"] as const,
 };
+
+export type SubscriptionTier = "free" | "pro";
+
+export interface UserSubscription {
+  tier: SubscriptionTier;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  currentPeriodEnd?: string;
+  cancelAtPeriodEnd?: boolean;
+}
+
+export interface RepurposingLink {
+  id: string;
+  parentCardId: string;
+  childCardId: string;
+  platform:
+    | "shorts"
+    | "reels"
+    | "tiktok"
+    | "threads"
+    | "newsletter"
+    | "blog"
+    | "linkedin"
+    | "custom";
+  customPlatform?: string;
+  status: "planned" | "in_progress" | "published" | "archived";
+  createdAt: string;
+  publishedAt?: string;
+}
+
+export interface BrandDeal {
+  id: string;
+  cardId?: string;
+  brandName: string;
+  contactEmail?: string;
+  contactName?: string;
+  deliverables: BrandDeliverable[];
+  totalValue: number;
+  currency: string;
+  status: "negotiating" | "active" | "completed" | "cancelled";
+  startDate?: string;
+  endDate?: string;
+  contractUrl?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BrandDeliverable {
+  id: string;
+  title: string;
+  description?: string;
+  dueDate: string;
+  status: "pending" | "in_progress" | "submitted" | "approved" | "paid";
+  platform?: string;
+  format?: string;
+  amount?: number;
+}
+
+export interface AnalyticsSnapshot {
+  userId: string;
+  periodStart: string;
+  periodEnd: string;
+  cardsCreated: number;
+  cardsPublished: number;
+  cardsArchived: number;
+  averageTimeToPublish: number;
+  completionRate: number;
+  velocity: number;
+  stageBottlenecks: Record<string, number>;
+  topTags: Array<{ tag: string; count: number }>;
+  repurposingCount: number;
+  brandDealsActive: number;
+  brandDealsRevenue: number;
+}
+
+export interface ExportOptions {
+  format: "pdf" | "csv" | "json" | "notion";
+  boardId?: string;
+  includeArchived: boolean;
+  includeChecklists: boolean;
+  includeTags: boolean;
+  includeLinks: boolean;
+  dateRange?: { start: string; end: string };
+}
+
+export interface KeyboardShortcut {
+  key: string;
+  description: string;
+  action: string;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
+
 export function createApiClient(
   baseUrl: string,
   getHeaders: () => Record<string, string> = () => ({}),
+  boardId?: string,
 ) {
   const base = baseUrl.replace(/\/$/, "");
+  const scope =
+    boardId === undefined ? "" : `?boardId=${encodeURIComponent(boardId)}`;
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`${base}${APP.apiPrefix}${path}`, {
       ...init,
@@ -200,23 +320,33 @@ export function createApiClient(
     });
     if (!response.ok) {
       const data: unknown = await response.json().catch(() => null);
-      const message =
-        data &&
-        typeof data === "object" &&
-        "error" in data &&
-        typeof data.error === "string"
-          ? data.error
-          : "Request failed. Please try again.";
-      throw new ApiError(response.status, message);
+      const body = (
+        data && typeof data === "object" && "error" in data ? data : null
+      ) as ApiErrorBody | null;
+      const message = body?.error ?? "Request failed. Please try again.";
+      throw new ApiError(response.status, message, body?.code);
     }
     return response.json() as Promise<T>;
   }
   return {
-    getBoard: () => request<Board | null>("/board"),
+    getBoard: () =>
+      request<Board | null>(
+        boardId === undefined
+          ? "/board"
+          : `/boards/${encodeURIComponent(boardId)}`,
+      ),
+    getBoards: () => request<BoardSummary[]>("/boards"),
     createBoard: (input: CreateBoard) =>
-      request<Board>("/board", { method: "POST", body: JSON.stringify(input) }),
+      request<Board>("/boards", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    deleteBoard: (id: string) =>
+      request<{ ok: true }>(`/boards/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     createCard: (title: string) =>
-      request<Card>("/cards", {
+      request<Card>(`/cards${scope}`, {
         method: "POST",
         body: JSON.stringify({ title }),
       }),
@@ -226,7 +356,7 @@ export function createApiClient(
         body: JSON.stringify(input),
       }),
     createStage: (input: CreateStage) =>
-      request<Stage>("/stages", {
+      request<Stage>(`/stages${scope}`, {
         method: "POST",
         body: JSON.stringify(input),
       }),
@@ -239,5 +369,36 @@ export function createApiClient(
       request<{ ok: true }>(`/stages/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
+    getDashboard: () => request<AnalyticsSnapshot>("/dashboard"),
+    getRepurposing: () => request<RepurposingLink[]>("/repurposing"),
+    createRepurposing: (input: Omit<RepurposingLink, "id" | "createdAt">) =>
+      request<RepurposingLink>("/repurposing", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    updateRepurposing: (id: string, input: Partial<RepurposingLink>) =>
+      request<RepurposingLink>(`/repurposing/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
+    getBrandDeals: () => request<BrandDeal[]>("/brand-deals"),
+    createBrandDeal: (
+      input: Omit<BrandDeal, "id" | "createdAt" | "updatedAt">,
+    ) =>
+      request<BrandDeal>("/brand-deals", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    updateBrandDeal: (id: string, input: Partial<BrandDeal>) =>
+      request<BrandDeal>(`/brand-deals/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
+    exportBoard: (options: ExportOptions) =>
+      request<Blob>(`/export`, {
+        method: "POST",
+        body: JSON.stringify(options),
+      }),
+    getSubscription: () => request<UserSubscription>("/subscription"),
   };
 }

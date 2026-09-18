@@ -1,6 +1,36 @@
-import type { Card } from "@cutline/shared";
-import { describe, expect, it } from "vitest";
-import { availableTags, checklistProgress, filterCards } from "./board-model";
+import { type Card, createApiClient } from "@cutline/shared";
+import { describe, expect, it, vi } from "vitest";
+import {
+  availableTags,
+  checklistProgress,
+  filterCards,
+  selectBoardId,
+} from "./board-model";
+
+it("fetches the selected second board with its own cards", async () => {
+  const boards = [{ id: "first" }, { id: "second" }];
+  const second = { id: "second", cards: [card({ boardId: "second" })] };
+  const fetch = vi
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => second });
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const selectedId = selectBoardId(boards, "second");
+    expect(selectedId).toBe("second");
+    const api = createApiClient(
+      "http://localhost:3001",
+      undefined,
+      selectedId ?? undefined,
+    );
+    expect(await api.getBoard()).toEqual(second);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:3001/api/boards/second",
+      expect.any(Object),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 function card(overrides: Partial<Card> = {}): Card {
   return {
@@ -20,6 +50,28 @@ function card(overrides: Partial<Card> = {}): Card {
     ...overrides,
   };
 }
+
+describe("board selection", () => {
+  const boards = [{ id: "first" }, { id: "second" }];
+
+  it("starts with the first board and preserves an existing selection", () => {
+    expect(selectBoardId(boards, null)).toBe("first");
+    expect(selectBoardId(boards, "second")).toBe("second");
+    expect(selectBoardId([...boards].reverse(), "first")).toBe("first");
+  });
+
+  it("falls back when a selected board is deleted elsewhere", () => {
+    expect(selectBoardId(boards, "deleted")).toBe("first");
+    expect(selectBoardId([{ id: "first" }], "second")).toBe("first");
+  });
+
+  it("returns to onboarding when no boards remain without mutating the list", () => {
+    expect(selectBoardId([], "second")).toBeNull();
+    expect(selectBoardId([], null)).toBeNull();
+    selectBoardId(boards, "second");
+    expect(boards).toEqual([{ id: "first" }, { id: "second" }]);
+  });
+});
 
 describe("board search", () => {
   it("matches all words across title, notes and tags, ignoring whitespace and case", () => {

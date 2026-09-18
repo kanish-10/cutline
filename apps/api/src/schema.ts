@@ -70,14 +70,19 @@ export const verification = sqliteTable("verification", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
-export const boards = sqliteTable("boards", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .unique()
-    .references(() => user.id, { onDelete: "cascade" }),
-  creatorType: text("creator_type").$type<CreatorType>().notNull(),
-});
+export const boards = sqliteTable(
+  "boards",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    creatorType: text("creator_type").$type<CreatorType>().notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("boards_user_idx").on(table.userId)],
+);
 export const stages = sqliteTable(
   "stages",
   {
@@ -119,3 +124,79 @@ export const cards = sqliteTable(
     index("cards_stage_idx").on(table.stageId),
   ],
 );
+export const repurposingLinks = sqliteTable(
+  "repurposing_links",
+  {
+    id: text("id").primaryKey(),
+    parentCardId: text("parent_card_id")
+      .notNull()
+      .references(() => cards.id, { onDelete: "cascade" }),
+    childCardId: text("child_card_id")
+      .notNull()
+      .references(() => cards.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull(),
+    customPlatform: text("custom_platform"),
+    status: text("status").notNull().default("planned"),
+    createdAt: text("created_at").notNull(),
+    publishedAt: text("published_at"),
+  },
+  (table) => [
+    index("repurposing_parent_idx").on(table.parentCardId),
+    index("repurposing_child_idx").on(table.childCardId),
+  ],
+);
+export const brandDeals = sqliteTable(
+  "brand_deals",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    cardId: text("card_id").references(() => cards.id, {
+      onDelete: "set null",
+    }),
+    brandName: text("brand_name").notNull(),
+    contactEmail: text("contact_email"),
+    contactName: text("contact_name"),
+    totalValue: integer("total_value").notNull().default(0),
+    currency: text("currency").notNull().default("USD"),
+    status: text("status").notNull().default("negotiating"),
+    startDate: text("start_date"),
+    endDate: text("end_date"),
+    contractUrl: text("contract_url"),
+    notes: text("notes"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [index("brand_deals_user_idx").on(table.userId)],
+);
+export const brandDeliverables = sqliteTable(
+  "brand_deliverables",
+  {
+    id: text("id").primaryKey(),
+    brandDealId: text("brand_deal_id")
+      .notNull()
+      .references(() => brandDeals.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    dueDate: text("due_date").notNull(),
+    status: text("status").notNull().default("pending"),
+    platform: text("platform"),
+    format: text("format"),
+    amount: integer("amount"),
+  },
+  (table) => [index("brand_deliverables_deal_idx").on(table.brandDealId)],
+);
+export const subscription = sqliteTable("subscription", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  tier: text("tier").notNull().default("free"),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  currentPeriodEnd: text("current_period_end"),
+  cancelAtPeriodEnd: integer("cancel_at_period_end", {
+    mode: "boolean",
+  }).default(false),
+  updatedAt: text("updated_at").notNull(),
+});

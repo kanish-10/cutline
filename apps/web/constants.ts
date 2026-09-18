@@ -2,6 +2,7 @@ import { COLORS, type CreatorType } from "@cutline/shared";
 
 export const WEB_THEME = {
   ...COLORS,
+  // Light theme (default)
   ink: "#292b25",
   paper: "#f7f6f2",
   surface: "#ffffff",
@@ -16,6 +17,25 @@ export const WEB_THEME = {
   "on-accent": "#ffffff",
   "story-ink": "#f2efe3",
   "story-muted": "#c4cbb8",
+} as const;
+
+export const WEB_THEME_DARK = {
+  ...COLORS,
+  // Dark theme
+  ink: "#f2efe3",
+  paper: "#1a1b20",
+  surface: "#222328",
+  accent: "#5d8c4c",
+  muted: "#9a9b90",
+  line: "#3d3e38",
+  danger: "#e57373",
+  success: "#66bb6a",
+  sidebar: "#222328",
+  soft: "#2a2b30",
+  "accent-soft": "#3a4a2f",
+  "on-accent": "#ffffff",
+  "story-ink": "#1a1b20",
+  "story-muted": "#5a5b50",
 } as const;
 
 export const AUTH_STEPS = [

@@ -3,6 +3,7 @@
 import type { Card, ChecklistItem, Stage, UpdateCard } from "@cutline/shared";
 import {
   ApiError,
+  ERROR_CODES,
   LIMITS,
   QUERY_KEYS,
   safeUrlSchema,
@@ -13,7 +14,7 @@ import { useState } from "react";
 import { UI } from "../constants";
 import { Modal } from "./modal";
 import { useUnsavedChanges } from "./use-unsaved-changes";
-import { ErrorNotice, useClients } from "./workspace";
+import { ErrorNotice, errorMessage, useClients } from "./workspace";
 
 type Draft = {
   title: string;
@@ -79,11 +80,19 @@ export function CardDetail({
       await onSaved(result, previousStage);
       if (previousStage !== result.stageId) onClose();
     },
-    onError: () => client.invalidateQueries({ queryKey: QUERY_KEYS.board }),
+    onError: () =>
+      client.invalidateQueries({
+        queryKey: QUERY_KEYS.boardById(card.boardId),
+      }),
   });
+  const capacityFull =
+    save.error instanceof ApiError &&
+    save.error.status === 409 &&
+    save.error.code === ERROR_CODES.cardLimit;
   const conflict =
-    remoteChanged ||
-    (save.error instanceof ApiError && save.error.status === 409);
+    !capacityFull &&
+    (remoteChanged ||
+      (save.error instanceof ApiError && save.error.status === 409));
   const next =
     stages[stages.findIndex((stage) => stage.id === draft.stageId) + 1];
 
@@ -148,6 +157,21 @@ export function CardDetail({
           submit();
         }}
       >
+        {capacityFull && (
+          <section className="conflict" role="alert">
+            <h3>Board is at capacity</h3>
+            <p>{errorMessage(save.error)}</p>
+            <div className="button-row">
+              <button
+                type="button"
+                disabled={save.isPending}
+                onClick={() => save.reset()}
+              >
+                Got it
+              </button>
+            </div>
+          </section>
+        )}
         {conflict && (
           <section className="conflict" role="alert">
             <h3>A newer version is available</h3>
@@ -206,7 +230,9 @@ export function CardDetail({
                 type="button"
                 disabled={save.isPending}
                 onClick={() =>
-                  client.invalidateQueries({ queryKey: QUERY_KEYS.board })
+                  client.invalidateQueries({
+                    queryKey: QUERY_KEYS.boardById(card.boardId),
+                  })
                 }
               >
                 Refresh latest

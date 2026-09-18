@@ -20,6 +20,8 @@ const card: Card = {
 };
 const board: Board = {
   id: "board",
+  name: "My board",
+  createdAt: "2026-09-17T00:00:00.000Z",
   creatorType: "video",
   cards: [card],
   stages: [

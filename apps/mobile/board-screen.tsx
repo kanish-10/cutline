@@ -1,8 +1,16 @@
-import type { Board, Card, SessionUser, Stage } from "@cutline/shared";
+import type {
+  Board,
+  BoardSummary,
+  Card,
+  CreateBoard,
+  SessionUser,
+  Stage,
+} from "@cutline/shared";
 import {
   ApiError,
   createBoardSchema,
   createCardSchema,
+  ERROR_CODES,
   LIMITS,
   QUERY_KEYS,
   TIMING,
@@ -16,7 +24,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { AppState, Text, View } from "react-native";
+import { Alert, AppState, ScrollView, Text, View } from "react-native";
 import { BoardCanvas } from "./board-canvas";
 import { BoardHeader } from "./board-header";
 import { BoardOnboarding } from "./board-onboarding";
@@ -26,7 +34,15 @@ import { CaptureBar } from "./capture-bar";
 import { CardDetail } from "./card-detail";
 import { useClients } from "./clients";
 import { StageEditor } from "./stage-editor";
-import { Button, ErrorNotice, Loading, Screen, styles, useAction } from "./ui";
+import {
+  Button,
+  confirmDiscard,
+  ErrorNotice,
+  Loading,
+  Screen,
+  styles,
+  useAction,
+} from "./ui";
 
 export function Workspace(props: {
   user: SessionUser;
@@ -63,16 +79,226 @@ export function Workspace(props: {
   );
 }
 
-function BoardScreen({
+function BoardScreen(props: { user: SessionUser; recheckSession: () => void }) {
+  const [boardId, setBoardId] = useState<string | null>(null);
+  const [showBoards, setShowBoards] = useState(true);
+  return showBoards || !boardId ? (
+    <BoardList
+      {...props}
+      selectedId={boardId}
+      onSelect={(id) => {
+        setBoardId(id);
+        setShowBoards(false);
+      }}
+    />
+  ) : (
+    <SelectedBoardScreen
+      key={boardId}
+      {...props}
+      boardId={boardId}
+      onBoards={() => setShowBoards(true)}
+    />
+  );
+}
+
+function BoardList({
   user,
   recheckSession,
+  selectedId,
+  onSelect,
 }: {
   user: SessionUser;
   recheckSession: () => void;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }) {
   const { api, authClient } = useClients();
   const client = useQueryClient();
-  const query = useQuery({ queryKey: QUERY_KEYS.board, queryFn: api.getBoard });
+  const query = useQuery({
+    queryKey: QUERY_KEYS.boards,
+    queryFn: api.getBoards,
+  });
+  const action = useAction();
+  const [creating, setCreating] = useState(false);
+  const firstBoard = query.data?.length === 0;
+
+  function createBoard(input: CreateBoard) {
+    void action.run(async () => {
+      const board = await api.createBoard(createBoardSchema.parse(input));
+      await client.cancelQueries({ queryKey: QUERY_KEYS.boards });
+      client.setQueryData(QUERY_KEYS.boardById(board.id), board);
+      client.setQueryData<BoardSummary[]>(QUERY_KEYS.boards, (current) => [
+        ...(current ?? []).filter((item) => item.id !== board.id),
+        {
+          id: board.id,
+          name: board.name,
+          createdAt: board.createdAt,
+          creatorType: board.creatorType,
+          cardCount: board.cards.length,
+        },
+      ]);
+      void client.invalidateQueries({ queryKey: QUERY_KEYS.boards });
+      onSelect(board.id);
+    });
+  }
+
+  function deleteBoard(board: BoardSummary) {
+    if (action.pending || board.cardCount !== 0) return;
+    Alert.alert(
+      `Delete “${board.name}”?`,
+      "Only empty boards can be deleted. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete board",
+          style: "destructive",
+          onPress: () => {
+            void action.run(async () => {
+              try {
+                await api.deleteBoard(board.id);
+                await client.cancelQueries({
+                  queryKey: QUERY_KEYS.boardById(board.id),
+                });
+                client.removeQueries({
+                  queryKey: QUERY_KEYS.boardById(board.id),
+                  exact: true,
+                });
+                await client.cancelQueries({ queryKey: QUERY_KEYS.boards });
+                client.setQueryData<BoardSummary[]>(
+                  QUERY_KEYS.boards,
+                  (current) => current?.filter((item) => item.id !== board.id),
+                );
+              } catch (error) {
+                if (
+                  error instanceof ApiError &&
+                  error.code === ERROR_CODES.boardNotEmpty
+                ) {
+                  throw new Error(
+                    "This board contains cards, including archived cards, and cannot be deleted.",
+                  );
+                }
+                throw error;
+              } finally {
+                void client.invalidateQueries({ queryKey: QUERY_KEYS.boards });
+              }
+            });
+          },
+        },
+      ],
+    );
+  }
+
+  return (
+    <Screen>
+      <BoardHeader
+        user={user}
+        capture={creating ? "new board" : ""}
+        pending={action.pending}
+        onBoards={() => {
+          if (!action.pending)
+            confirmDiscard(creating, () => setCreating(false));
+        }}
+        onSignOut={() =>
+          action.run(async () => {
+            const result = await authClient.signOut();
+            await client.cancelQueries();
+            client.clear();
+            recheckSession();
+            if (result.error)
+              throw new Error(result.error.message ?? "Sign out failed.");
+          })
+        }
+      />
+      <View style={local.notices}>
+        <ErrorNotice error={action.error} />
+        <ErrorNotice error={query.error} />
+        {query.error && (
+          <Button
+            title="Retry sync / check session"
+            disabled={query.isFetching || action.pending}
+            onPress={() => {
+              recheckSession();
+              void query.refetch();
+            }}
+          />
+        )}
+      </View>
+      {query.isPending ? (
+        <Loading label="Opening your boards…" />
+      ) : creating || firstBoard ? (
+        <>
+          {creating && (
+            <View style={local.notices}>
+              <Button
+                title="Cancel new board"
+                disabled={action.pending}
+                onPress={() => confirmDiscard(true, () => setCreating(false))}
+              />
+            </View>
+          )}
+          <BoardOnboarding pending={action.pending} onChoose={createBoard} />
+        </>
+      ) : query.data ? (
+        <ScrollView contentContainerStyle={[styles.content, styles.form]}>
+          <Text accessibilityRole="header" style={styles.heading}>
+            Your boards
+          </Text>
+          <Button
+            title="Create named board"
+            primary
+            disabled={action.pending}
+            onPress={() => {
+              action.clearError();
+              setCreating(true);
+            }}
+          />
+          {query.data.map((board) => (
+            <View key={board.id} style={styles.card}>
+              <Text style={styles.heading}>{board.name}</Text>
+              <Text style={styles.muted}>
+                {board.cardCount} cards, including archived
+              </Text>
+              <Button
+                title={`Open ${board.name}`}
+                selected={board.id === selectedId}
+                disabled={action.pending}
+                onPress={() => onSelect(board.id)}
+              />
+              <Button
+                title="Delete empty board"
+                label={`Delete ${board.name}`}
+                danger
+                disabled={
+                  action.pending || query.isFetching || board.cardCount !== 0
+                }
+                onPress={() => deleteBoard(board)}
+              />
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+    </Screen>
+  );
+}
+
+function SelectedBoardScreen({
+  user,
+  recheckSession,
+  boardId,
+  onBoards,
+}: {
+  user: SessionUser;
+  recheckSession: () => void;
+  boardId: string;
+  onBoards: () => void;
+}) {
+  const { api: workspaceApi, authClient } = useClients();
+  const api = workspaceApi.forBoard(boardId);
+  const client = useQueryClient();
+  const query = useQuery({
+    queryKey: QUERY_KEYS.boardById(boardId),
+    queryFn: api.getBoard,
+  });
   const action = useAction();
   const [capture, setCapture] = useState("");
   const [archive, setArchive] = useState(false);
@@ -85,7 +311,11 @@ function BoardScreen({
     (a, b) => a.position - b.position,
   );
   const refresh = () =>
-    client.invalidateQueries({ queryKey: QUERY_KEYS.board });
+    client.invalidateQueries({ queryKey: QUERY_KEYS.boardById(boardId) });
+  function openBoards() {
+    if (action.pending || selected || editingStage) return;
+    confirmDiscard(Boolean(capture), onBoards);
+  }
   useEffect(() => {
     if (!undo) return;
     const timer = setTimeout(
@@ -96,11 +326,13 @@ function BoardScreen({
   }, [undo]);
 
   async function acceptCard(card: Card) {
-    await client.cancelQueries({ queryKey: QUERY_KEYS.board });
-    client.setQueryData<Board | null>(QUERY_KEYS.board, (current) =>
+    const queryKey = QUERY_KEYS.boardById(card.boardId);
+    await client.cancelQueries({ queryKey });
+    client.setQueryData<Board | null>(queryKey, (current) =>
       replaceCard(current, card),
     );
-    void refresh();
+    void client.invalidateQueries({ queryKey });
+    void client.invalidateQueries({ queryKey: QUERY_KEYS.boards });
   }
 
   function advance(card: Card, next: Stage) {
@@ -151,7 +383,10 @@ function BoardScreen({
           <BoardHeader
             user={user}
             capture={capture}
-            pending={action.pending}
+            pending={
+              action.pending || Boolean(selected) || Boolean(editingStage)
+            }
+            onBoards={openBoards}
             onSignOut={signOut}
           />
           <View style={local.notices}>
@@ -172,7 +407,7 @@ function BoardScreen({
           </View>
           <View style={styles.header}>
             <Text accessibilityRole="header" style={styles.heading}>
-              {archive ? "Archive" : "Your pipeline"}
+              {archive ? `${board.name} · Archive` : board.name}
             </Text>
             <Button
               title={archive ? "Back to board" : "Archive"}
@@ -239,7 +474,10 @@ function BoardScreen({
               onChange={setCapture}
               onCapture={captureIdea}
               pending={action.pending}
-              full={board.cards.length >= LIMITS.cards}
+              full={
+                board.cards.filter((card) => !card.archived).length >=
+                LIMITS.cards
+              }
               stage={stages[0]?.name ?? "your board"}
             />
           )}
@@ -266,7 +504,10 @@ function BoardScreen({
           <BoardHeader
             user={user}
             capture={capture}
-            pending={action.pending}
+            pending={
+              action.pending || Boolean(selected) || Boolean(editingStage)
+            }
+            onBoards={openBoards}
             onSignOut={signOut}
           />
           <View style={local.notices}>
@@ -288,19 +529,7 @@ function BoardScreen({
           {query.isPending ? (
             <Loading label="Opening your workspace…" />
           ) : board === null ? (
-            <BoardOnboarding
-              pending={action.pending}
-              onChoose={(creatorType) => {
-                void action.run(async () => {
-                  const result = await api.createBoard(
-                    createBoardSchema.parse({ creatorType }),
-                  );
-                  await client.cancelQueries({ queryKey: QUERY_KEYS.board });
-                  client.setQueryData(QUERY_KEYS.board, result);
-                  void refresh();
-                });
-              }}
-            />
+            <ErrorNotice error="This board is no longer available. Choose another board." />
           ) : null}
         </>
       )}

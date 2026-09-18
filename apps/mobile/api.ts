@@ -62,15 +62,19 @@ export function apiOrigin(
 export function createMobileApi(
   baseUrl: string,
   getCookie: () => Promise<string>,
+  boardId?: string,
 ) {
   const origin = apiOrigin(baseUrl);
   async function request<T>(
     action: (client: ReturnType<typeof createApiClient>) => Promise<T>,
   ) {
     const cookie = await getCookie();
-    return action(createApiClient(origin, () => ({ Cookie: cookie })));
+    return action(createApiClient(origin, () => ({ Cookie: cookie }), boardId));
   }
   return {
+    forBoard: (id: string) => createMobileApi(origin, getCookie, id),
+    getBoards: () => request((client) => client.getBoards()),
+    deleteBoard: (id: string) => request((client) => client.deleteBoard(id)),
     getBoard: () => request((client) => client.getBoard()),
     createBoard: (input: CreateBoard) =>
       request((client) => client.createBoard(input)),

@@ -1,4 +1,13 @@
-import type { Card } from "@cutline/shared";
+import type { BoardSummary, Card } from "@cutline/shared";
+
+export function selectBoardId(
+  boards: readonly Pick<BoardSummary, "id">[],
+  selectedId: string | null,
+) {
+  return (
+    boards.find((board) => board.id === selectedId)?.id ?? boards[0]?.id ?? null
+  );
+}
 
 export function filterCards(
   cards: Card[],

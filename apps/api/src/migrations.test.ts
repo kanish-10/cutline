@@ -65,16 +65,18 @@ function withNextMigration(name: string) {
   cpSync(migrationsFolder, folder, { recursive: true });
   const journalPath = join(folder, "meta/_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  const last = journal.entries.at(-1);
   journal.entries.push({
-    idx: 1,
+    idx: last.idx + 1,
     version: "6",
-    when: journal.entries[0].when + 1,
-    tag: "0001_test",
+    when: last.when + 1,
+    tag: `${String(last.idx + 1).padStart(4, "0")}_test`,
     breakpoints: true,
   });
   writeFileSync(journalPath, JSON.stringify(journal));
-  writeFileSync(join(folder, "0001_test.sql"), fixture(name));
-  return folder;
+  const file = `${String(last.idx + 1).padStart(4, "0")}_test.sql`;
+  writeFileSync(join(folder, file), fixture(name));
+  return { folder, file };
 }
 
 afterEach(() => {
@@ -92,10 +94,19 @@ describe("managed migrations", () => {
     sqlite.exec(fixture("data"));
     const before = data(sqlite);
     const schema = objects(sqlite);
-    const migration = readMigrationFiles({ migrationsFolder })[0];
+    const migrations = readMigrationFiles({ migrationsFolder });
     expect(
-      sqlite.prepare("SELECT hash, created_at FROM __drizzle_migrations").all(),
-    ).toEqual([{ hash: migration?.hash, created_at: migration?.folderMillis }]);
+      sqlite
+        .prepare(
+          "SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at",
+        )
+        .all(),
+    ).toEqual(
+      migrations.map((migration) => ({
+        hash: migration.hash,
+        created_at: migration.folderMillis,
+      })),
+    );
     migrate(sqlite);
     expect(objects(sqlite)).toEqual(schema);
     expect(data(sqlite)).toEqual(before);
@@ -108,38 +119,60 @@ describe("managed migrations", () => {
     expect(reopened.pragma("foreign_keys", { simple: true })).toBe(1);
   });
 
-  it("adopts exact legacy v1 without rebuilding tables or changing any user data", () => {
+  it("adopts legacy v1, preserves all rows, and rebuilds only boards", () => {
     const filename = join(temporary(), "legacy.db");
     const sqlite = database(filename);
     legacy(sqlite);
     const before = data(sqlite);
     const roots = sqlite
       .prepare(
-        "SELECT name, rootpage FROM sqlite_schema WHERE type = 'table' ORDER BY name",
+        "SELECT name, rootpage FROM sqlite_schema WHERE type = 'table' AND name != 'boards' ORDER BY name",
       )
       .all();
     migrate(sqlite);
-    expect(data(sqlite)).toEqual(before);
+    expect(
+      sqlite.prepare("SELECT * FROM boards WHERE id = 'b1'").get(),
+    ).toEqual({
+      id: "b1",
+      user_id: "u1",
+      name: "My board",
+      creator_type: "video",
+      created_at: expect.any(String),
+    });
+    const preservedRows = () =>
+      tables.map((table) =>
+        sqlite
+          .prepare(
+            table === "boards"
+              ? "SELECT id, user_id, creator_type FROM boards ORDER BY id"
+              : `SELECT * FROM "${table}" ORDER BY id`,
+          )
+          .all(),
+      );
+    expect(preservedRows()).toEqual(before);
     expect(
       sqlite.prepare("SELECT version FROM schema_migrations").all(),
     ).toEqual([{ version: 1 }]);
+    expect(sqlite.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(
       sqlite
         .prepare(
-          "SELECT name, rootpage FROM sqlite_schema WHERE type = 'table' AND name != '__drizzle_migrations' ORDER BY name",
+          "SELECT name, rootpage FROM sqlite_schema WHERE type = 'table' AND name NOT IN ('__drizzle_migrations', 'boards') ORDER BY name",
         )
         .all(),
     ).toEqual(roots);
     const schema = objects(sqlite);
     migrate(sqlite);
     expect(objects(sqlite)).toEqual(schema);
+    const upgraded = data(sqlite);
     sqlite.close();
     const reopened = database(filename);
     migrate(reopened);
-    expect(data(reopened)).toEqual(before);
+    expect(reopened.pragma("foreign_key_check")).toEqual([]);
+    expect(data(reopened)).toEqual(upgraded);
   });
 
-  it("verifies generated baseline columns, defaults, foreign keys and index semantics against legacy", () => {
+  it("verifies generated baseline+0001 columns, defaults, foreign keys and index semantics against legacy", () => {
     const old = database();
     legacy(old);
     const fresh = database();
@@ -147,6 +180,7 @@ describe("managed migrations", () => {
     const columns = (sqlite: Database.Database, table: string) =>
       (
         sqlite.pragma(`table_xinfo('${table}')`) as {
+          name: string;
           dflt_value: string | null;
         }[]
       ).map((column) => ({
@@ -171,11 +205,106 @@ describe("managed migrations", () => {
           columns: sqlite.pragma(`index_xinfo('${index.name}')`),
         }))
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    for (const table of tables) {
+    for (const table of tables.filter((name) => name !== "boards")) {
       expect(columns(fresh, table)).toEqual(columns(old, table));
       expect(foreignKeys(fresh, table)).toEqual(foreignKeys(old, table));
       expect(indexes(fresh, table)).toEqual(indexes(old, table));
     }
+    expect(columns(fresh, "boards").map((column) => column.name)).toEqual([
+      "id",
+      "user_id",
+      "name",
+      "creator_type",
+      "created_at",
+    ]);
+    expect(
+      columns(fresh, "boards").find((column) => column.name === "name")
+        ?.dflt_value,
+    ).toBe("'My board'");
+    expect(
+      indexes(fresh, "boards")
+        .map((index) => ({
+          unique: index.unique,
+          origin: (index.columns as { name: string }[])
+            .filter((column) => column.name)
+            .map((column) => column.name),
+        }))
+        .sort((a, b) => a.origin.join().localeCompare(b.origin.join())),
+    ).toEqual([
+      { unique: 1, origin: ["id"] },
+      { unique: 0, origin: ["user_id"] },
+    ]);
+    expect(foreignKeys(fresh, "boards")).toEqual(foreignKeys(old, "boards"));
+  });
+
+  it.each(["fresh", "legacy", "baseline"])(
+    "supports multiple boards after migrating %s and enforces foreign keys",
+    (kind) => {
+      const sqlite = database();
+      if (kind === "legacy") legacy(sqlite);
+      if (kind === "baseline") {
+        const { folder } = withNextMigration("next");
+        const journalPath = join(folder, "meta/_journal.json");
+        const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+        journal.entries = journal.entries.slice(0, 1);
+        writeFileSync(journalPath, JSON.stringify(journal));
+        migrate(sqlite, folder);
+        sqlite.exec(fixture("data"));
+      }
+      const before = kind === "fresh" ? [] : data(sqlite);
+      migrate(sqlite);
+      if (kind === "fresh") sqlite.exec(fixture("data"));
+      else {
+        for (const [index, table] of tables.entries()) {
+          if (table !== "boards") {
+            expect(
+              sqlite.prepare(`SELECT * FROM "${table}" ORDER BY id`).all(),
+            ).toEqual(before[index]);
+          }
+        }
+      }
+      sqlite.exec(
+        "INSERT INTO boards (id, user_id, creator_type) VALUES ('b2', 'u1', 'video')",
+      );
+      expect(sqlite.prepare("SELECT id FROM boards ORDER BY id").all()).toEqual(
+        [{ id: "b1" }, { id: "b2" }],
+      );
+      expect(() =>
+        sqlite.exec(
+          "INSERT INTO boards (id, user_id, creator_type) VALUES ('b3', 'missing', 'video')",
+        ),
+      ).toThrow(/FOREIGN KEY/);
+      sqlite.exec("DELETE FROM boards WHERE id = 'b2'");
+      expect(sqlite.prepare("SELECT id FROM cards").all()).toEqual([
+        { id: "c1" },
+      ]);
+      sqlite.exec("DELETE FROM user WHERE id = 'u1'");
+      for (const table of ["boards", "stages", "cards"]) {
+        expect(sqlite.prepare(`SELECT * FROM "${table}"`).all()).toEqual([]);
+      }
+      expect(sqlite.pragma("foreign_key_check")).toEqual([]);
+      expect(sqlite.pragma("foreign_keys", { simple: true })).toBe(1);
+    },
+  );
+
+  it("rolls back migration-introduced foreign key violations and restores enforcement", () => {
+    const sqlite = database();
+    migrate(sqlite);
+    sqlite.exec(fixture("data"));
+    const before = data(sqlite);
+    const schema = objects(sqlite);
+    const ledger = sqlite.prepare("SELECT * FROM __drizzle_migrations").all();
+    const { folder, file } = withNextMigration("next");
+    writeFileSync(join(folder, file), "UPDATE boards SET user_id = 'missing';");
+    expect(() => migrate(sqlite, folder)).toThrow(/foreign key violations/);
+    expect(data(sqlite)).toEqual(before);
+    expect(objects(sqlite)).toEqual(schema);
+    expect(sqlite.prepare("SELECT * FROM __drizzle_migrations").all()).toEqual(
+      ledger,
+    );
+    expect(sqlite.inTransaction).toBe(false);
+    expect(sqlite.pragma("foreign_keys", { simple: true })).toBe(1);
+    expect(sqlite.pragma("foreign_key_check")).toEqual([]);
   });
 
   it.each([
@@ -219,33 +348,36 @@ describe("managed migrations", () => {
       }
       const schema = objects(sqlite);
       const before = kind === "fresh" ? [] : data(sqlite);
-      const folder = withNextMigration("failure");
+      const { folder, file } = withNextMigration("failure");
       expect(() => migrate(sqlite, folder)).toThrow(/missing_table/);
       expect(sqlite.inTransaction).toBe(false);
       expect(objects(sqlite)).toEqual(schema);
       if (kind !== "fresh") expect(data(sqlite)).toEqual(before);
-      writeFileSync(join(folder, "0001_test.sql"), fixture("next"));
+      const appliedCount = readMigrationFiles({
+        migrationsFolder: folder,
+      }).length;
+      writeFileSync(join(folder, file), fixture("next"));
       migrate(sqlite, folder);
       expect(sqlite.prepare("SELECT * FROM migration_probe").all()).toEqual([
         { id: 1 },
       ]);
       expect(
         sqlite.prepare("SELECT * FROM __drizzle_migrations").all(),
-      ).toHaveLength(2);
+      ).toHaveLength(appliedCount);
       migrate(sqlite, folder);
       expect(
         sqlite.prepare("SELECT * FROM __drizzle_migrations").all(),
-      ).toHaveLength(2);
+      ).toHaveLength(appliedCount);
     },
   );
 
   it("refuses changed or missing applied history", () => {
     const sqlite = database();
-    const folder = withNextMigration("next");
+    const { folder, file } = withNextMigration("next");
     migrate(sqlite, folder);
     const before = objects(sqlite);
     expect(() => migrate(sqlite)).toThrow(/history mismatch/);
-    writeFileSync(join(folder, "0001_test.sql"), fixture("failure"));
+    writeFileSync(join(folder, file), fixture("failure"));
     expect(() => migrate(sqlite, folder)).toThrow(/history mismatch/);
     expect(objects(sqlite)).toEqual(before);
   });
@@ -264,7 +396,7 @@ describe("managed migrations", () => {
   it("refuses adoption against a modified baseline", () => {
     const sqlite = database();
     legacy(sqlite);
-    const folder = withNextMigration("next");
+    const { folder } = withNextMigration("next");
     writeFileSync(join(folder, "0000_baseline.sql"), fixture("next"));
     const before = objects(sqlite);
     const rows = data(sqlite);

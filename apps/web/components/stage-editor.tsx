@@ -28,7 +28,7 @@ export function StageEditor({
   board: Board;
   onClose: () => void;
 }) {
-  const { api } = useClients();
+  const { api } = useClients(board.id);
   const client = useQueryClient();
   const initialColor =
     stage?.color ??
@@ -77,10 +77,13 @@ export function StageEditor({
       }
       if (action.kind === "reorder")
         setMessage(`Moved stage ${action.direction}.`);
-      await client.invalidateQueries({ queryKey: QUERY_KEYS.board });
+      await client.invalidateQueries({
+        queryKey: QUERY_KEYS.boardById(board.id),
+      });
       if (action.kind === "delete" || !stage) onClose();
     },
-    onError: () => client.invalidateQueries({ queryKey: QUERY_KEYS.board }),
+    onError: () =>
+      client.invalidateQueries({ queryKey: QUERY_KEYS.boardById(board.id) }),
   });
   function close() {
     if (!mutation.isPending && (!dirty || window.confirm(UI.discardMessage)))

@@ -29,7 +29,7 @@ export function undoInput(
 }
 
 export function replaceCard(board: Board | null | undefined, card: Card) {
-  if (!board) return board;
+  if (!board || board.id !== card.boardId) return board;
   return {
     ...board,
     cards: board.cards.some((item) => item.id === card.id)

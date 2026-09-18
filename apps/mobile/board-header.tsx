@@ -7,11 +7,13 @@ export function BoardHeader({
   capture,
   pending,
   onSignOut,
+  onBoards,
 }: {
   user: SessionUser;
   capture: string;
   pending: boolean;
   onSignOut: () => Promise<unknown>;
+  onBoards?: (() => void) | undefined;
 }) {
   const action = useAction();
   return (
@@ -22,6 +24,13 @@ export function BoardHeader({
         </Text>
         <Text style={styles.muted}>{user.name}</Text>
       </View>
+      {onBoards && (
+        <Button
+          title="Boards"
+          disabled={action.pending || pending}
+          onPress={onBoards}
+        />
+      )}
       <Button
         title="Sign out"
         disabled={action.pending || pending}

@@ -5,7 +5,11 @@
     "types": ["node", "react", "react-dom"],
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "incremental": true,
-    "plugins": [{ "name": "next" }]
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@/*": ["./*"],
+      "@cutline/*": ["../../packages/*/src"]
+    }
   },
   "include": [
     "**/*.ts",

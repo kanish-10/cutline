@@ -31,7 +31,8 @@ export function StageEditor({
   board: Board;
   onClose: () => void;
 }) {
-  const { api } = useClients();
+  const { api: workspaceApi } = useClients();
+  const api = workspaceApi.forBoard(board.id);
   const client = useQueryClient();
   const initialColor =
     stage?.color ??
@@ -52,10 +53,14 @@ export function StageEditor({
     void action.run(async () => {
       try {
         await operation();
-        await client.invalidateQueries({ queryKey: QUERY_KEYS.board });
+        await client.invalidateQueries({
+          queryKey: QUERY_KEYS.boardById(board.id),
+        });
         onClose();
       } catch (error) {
-        void client.invalidateQueries({ queryKey: QUERY_KEYS.board });
+        void client.invalidateQueries({
+          queryKey: QUERY_KEYS.boardById(board.id),
+        });
         throw error;
       }
     });

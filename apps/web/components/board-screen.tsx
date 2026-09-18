@@ -2,7 +2,9 @@
 
 import type {
   Board,
+  BoardSummary,
   Card,
+  CreateBoard,
   CreatorType,
   SessionUser,
   Stage,
@@ -10,6 +12,7 @@ import type {
 import {
   ApiError,
   CREATOR_TYPES,
+  createBoardSchema,
   LIMITS,
   QUERY_KEYS,
   TEMPLATES,
@@ -19,9 +22,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { CREATOR_OPTIONS } from "../constants";
 import { BoardCanvas } from "./board-canvas";
-import { availableTags, filterCards } from "./board-model";
+import { availableTags, filterCards, selectBoardId } from "./board-model";
 import { Icon } from "./brand";
 import { CardDetail } from "./card-detail";
+import { Modal } from "./modal";
 import { StageEditor } from "./stage-editor";
 import { useUnsavedChanges } from "./use-unsaved-changes";
 import { ErrorNotice, useClients } from "./workspace";
@@ -43,12 +47,63 @@ export function BoardScreen({
   user: SessionUser;
   onSignedOut: () => unknown;
 }) {
-  const { api, auth } = useClients();
-  const client = useQueryClient();
-  const boardQuery = useQuery({
-    queryKey: QUERY_KEYS.board,
-    queryFn: api.getBoard,
+  const { api } = useClients();
+  const boardsQuery = useQuery({
+    queryKey: QUERY_KEYS.boards,
+    queryFn: api.getBoards,
   });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const boards = boardsQuery.data ?? [];
+  const boardId = selectBoardId(boards, selectedId);
+  useEffect(() => {
+    if (boardsQuery.data) setSelectedId(boardId);
+  }, [boardId, boardsQuery.data]);
+  return (
+    <SelectedBoardScreen
+      key={boardId ?? "onboarding"}
+      user={user}
+      onSignedOut={onSignedOut}
+      boardId={boardId}
+      boards={boards}
+      boardsLoading={boardsQuery.isPending}
+      boardsError={boardsQuery.error}
+      onRetryBoards={() => void boardsQuery.refetch()}
+      onSelectBoard={setSelectedId}
+    />
+  );
+}
+
+function SelectedBoardScreen({
+  user,
+  onSignedOut,
+  boardId,
+  boards,
+  boardsLoading,
+  boardsError,
+  onRetryBoards,
+  onSelectBoard,
+}: {
+  user: SessionUser;
+  onSignedOut: () => unknown;
+  boardId: string | null;
+  boards: BoardSummary[];
+  boardsLoading: boolean;
+  boardsError: unknown;
+  onRetryBoards: () => void;
+  onSelectBoard: (id: string) => void;
+}) {
+  const { api, auth } = useClients(boardId ?? undefined);
+  const client = useQueryClient();
+  const boardKey = QUERY_KEYS.boardById(boardId ?? "");
+  const boardQuery = useQuery({
+    queryKey: boardKey,
+    queryFn: api.getBoard,
+    enabled: boardId !== null,
+  });
+  const [creatingBoard, setCreatingBoard] = useState(false);
+  const [boardName, setBoardName] = useState("");
+  const [creatorType, setCreatorType] = useState<CreatorType>("video");
+  const [boardValidation, setBoardValidation] = useState<unknown>(null);
   const [archive, setArchive] = useState(false);
   const [search, setSearch] = useState("");
   const [tag, setTag] = useState("");
@@ -61,14 +116,34 @@ export function BoardScreen({
   const [notice, setNotice] = useState("");
   const operationLock = useRef(false);
   const captureRef = useRef<HTMLInputElement>(null);
-  useUnsavedChanges(Boolean(capture));
-  const refresh = () => {
-    void client.invalidateQueries({ queryKey: QUERY_KEYS.board });
-  };
-  const board = boardQuery.data;
+  useUnsavedChanges(Boolean(capture || boardName));
+  const refresh = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: boardKey }),
+      client.invalidateQueries({ queryKey: QUERY_KEYS.boards }),
+    ]);
+  const board = boardId ? boardQuery.data : null;
+
+  useEffect(() => {
+    if (
+      !boardId ||
+      !(
+        boardQuery.data === null ||
+        (boardQuery.error instanceof ApiError &&
+          boardQuery.error.status === 404)
+      )
+    )
+      return;
+    client.setQueryData<BoardSummary[]>(QUERY_KEYS.boards, (current) =>
+      current?.filter((item) => item.id !== boardId),
+    );
+    void client.invalidateQueries({ queryKey: QUERY_KEYS.boards });
+  }, [boardId, boardQuery.data, boardQuery.error, client]);
   const stages = [...(board?.stages ?? [])].sort(
     (a, b) => a.position - b.position,
   );
+  const activeCount = board?.cards.filter((card) => !card.archived).length ?? 0;
+  const captureFull = activeCount >= LIMITS.cards;
 
   useEffect(() => {
     if (!undo) return;
@@ -80,8 +155,9 @@ export function BoardScreen({
   }, [undo]);
 
   async function acceptCard(card: Card) {
-    await client.cancelQueries({ queryKey: QUERY_KEYS.board });
-    client.setQueryData<Board | null>(QUERY_KEYS.board, (current) =>
+    const key = QUERY_KEYS.boardById(card.boardId);
+    await client.cancelQueries({ queryKey: key });
+    client.setQueryData<Board | null>(key, (current) =>
       current
         ? {
             ...current,
@@ -109,9 +185,36 @@ export function BoardScreen({
   }
 
   const createBoard = useMutation({
-    mutationFn: (creatorType: CreatorType) => api.createBoard({ creatorType }),
-    onSuccess: (result) => client.setQueryData(QUERY_KEYS.board, result),
-    onSettled: refresh,
+    mutationFn: (input: CreateBoard) => api.createBoard(input),
+    onSuccess: async (result) => {
+      await client.cancelQueries({ queryKey: QUERY_KEYS.boards });
+      client.setQueryData(QUERY_KEYS.boardById(result.id), result);
+      client.setQueryData<BoardSummary[]>(QUERY_KEYS.boards, (current = []) => [
+        ...current.filter((item) => item.id !== result.id),
+        {
+          id: result.id,
+          name: result.name,
+          createdAt: result.createdAt,
+          creatorType: result.creatorType,
+          cardCount: result.cards.length,
+        },
+      ]);
+      onSelectBoard(result.id);
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: QUERY_KEYS.boards }),
+  });
+  const deleteBoard = useMutation({
+    mutationFn: (id: string) => api.deleteBoard(id),
+    onSuccess: async (_, id) => {
+      await client.cancelQueries({ queryKey: QUERY_KEYS.boards });
+      await client.cancelQueries({ queryKey: QUERY_KEYS.boardById(id) });
+      client.removeQueries({ queryKey: QUERY_KEYS.boardById(id) });
+      client.setQueryData<BoardSummary[]>(QUERY_KEYS.boards, (current) =>
+        current?.filter((item) => item.id !== id),
+      );
+    },
+    onError: refresh,
+    onSettled: () => client.invalidateQueries({ queryKey: QUERY_KEYS.boards }),
   });
   const createCard = useMutation({
     mutationFn: (title: string) => api.createCard(title),
@@ -176,7 +279,41 @@ export function BoardScreen({
       await onSignedOut();
     },
   });
-  const busy = move.isPending || createCard.isPending || signout.isPending;
+  const busy =
+    move.isPending ||
+    createCard.isPending ||
+    signout.isPending ||
+    createBoard.isPending ||
+    deleteBoard.isPending;
+  const switchingBlocked =
+    busy || Boolean(selected || stageEditor || creatingBoard);
+
+  function leaveBoard(action: () => void) {
+    if (switchingBlocked || operationLock.current) return;
+    if (
+      capture &&
+      !window.confirm("Discard your captured idea and leave this board?")
+    )
+      return;
+    setCapture("");
+    action();
+  }
+
+  function submitBoard(type: CreatorType) {
+    if (busy) return;
+    const parsed = createBoardSchema.safeParse({
+      name: boardName,
+      creatorType: type,
+    });
+    if (!parsed.success) {
+      setBoardValidation(
+        new Error("Give your board a name (1–80 characters)."),
+      );
+      return;
+    }
+    setBoardValidation(null);
+    createBoard.mutate(parsed.data);
+  }
 
   function moveCard(card: Card, stageId: string) {
     if (
@@ -215,12 +352,21 @@ export function BoardScreen({
           setTag("");
           setSearch("");
         }}
-        busy={busy}
+        boards={boards}
+        boardId={boardId}
+        switchingBlocked={
+          switchingBlocked || boardsLoading || Boolean(boardsError)
+        }
+        onSelectBoard={(id) => {
+          if (id !== boardId) leaveBoard(() => onSelectBoard(id));
+        }}
+        onCreateBoard={() => leaveBoard(() => setCreatingBoard(true))}
+        busy={switchingBlocked}
         signingOut={signout.isPending}
         onSignOut={() => {
           if (
-            !capture ||
-            window.confirm("Discard your captured idea and sign out?")
+            !(capture || boardName) ||
+            window.confirm("Discard your unsaved draft and sign out?")
           )
             signout.mutate();
         }}
@@ -234,10 +380,19 @@ export function BoardScreen({
           <span className="workspace-label">Made for the work you make.</span>
         </header>
         <ErrorNotice error={signout.error} />
+        {Boolean(boardsError) && (
+          <div className="sync-error">
+            <ErrorNotice error={boardsError} />
+            <button type="button" onClick={onRetryBoards}>
+              Retry board list
+            </button>
+          </div>
+        )}
+        <ErrorNotice error={deleteBoard.error} />
         <div className="sr-only" role="status">
           {notice}
         </div>
-        {boardQuery.isPending ? (
+        {boardsLoading || (boardId && boardQuery.isPending) ? (
           <section className="center-state" aria-busy="true">
             <p>Getting your ideas together…</p>
           </section>
@@ -253,7 +408,7 @@ export function BoardScreen({
                 <p>Session expired. Sign out above, then sign back in.</p>
               )}
           </section>
-        ) : board === null ? (
+        ) : board === null && !boardId && !boardsError ? (
           <section className="onboarding">
             <p className="eyebrow">A PLACE TO START</p>
             <h1>What do you make?</h1>
@@ -261,14 +416,26 @@ export function BoardScreen({
             <p className="muted">
               Choose a starting point. Every stage is yours to customize.
             </p>
+            <label className="board-name-field">
+              Board name
+              <input
+                value={boardName}
+                maxLength={LIMITS.name}
+                required
+                disabled={busy}
+                placeholder="My production board"
+                onChange={(event) => setBoardName(event.target.value)}
+              />
+            </label>
+            <ErrorNotice error={boardValidation} />
             <div className="template-grid">
               {CREATOR_TYPES.map((type) => (
                 <button
                   className="template"
                   key={type}
                   type="button"
-                  disabled={createBoard.isPending || signout.isPending}
-                  onClick={() => createBoard.mutate(type)}
+                  disabled={busy || !boardName.trim()}
+                  onClick={() => submitBoard(type)}
                 >
                   <span className="template-mark">
                     {CREATOR_OPTIONS[type].mark}
@@ -297,7 +464,7 @@ export function BoardScreen({
                   {CREATOR_OPTIONS[board.creatorType].label.toUpperCase()}{" "}
                   STUDIO
                 </p>
-                <h1>{archive ? "The archive" : "Your work, in motion."}</h1>
+                <h1>{archive ? `${board.name} · Archive` : board.name}</h1>
                 <p className="muted">
                   {archive
                     ? "Finished for now. Ready whenever you are."
@@ -307,7 +474,7 @@ export function BoardScreen({
               <button
                 type="button"
                 className="primary"
-                disabled={busy || board.cards.length >= LIMITS.cards}
+                disabled={busy || captureFull}
                 onClick={() => captureRef.current?.focus()}
               >
                 <Icon name="plus" />
@@ -388,6 +555,37 @@ export function BoardScreen({
                 </button>
               </div>
             )}
+            <div className="board-management">
+              <p id="delete-board-help" className="muted">
+                Only empty boards can be deleted. Active and archived ideas
+                count.
+              </p>
+              <button
+                type="button"
+                className="danger-button"
+                aria-describedby="delete-board-help"
+                disabled={
+                  switchingBlocked ||
+                  boardQuery.isError ||
+                  boardQuery.isFetching ||
+                  board.cards.length > 0 ||
+                  (boards.find((item) => item.id === board.id)?.cardCount ??
+                    0) > 0
+                }
+                onClick={() =>
+                  leaveBoard(() => {
+                    if (
+                      window.confirm(
+                        `Delete “${board.name}” and all its stages? This cannot be undone.`,
+                      )
+                    )
+                      deleteBoard.mutate(board.id);
+                  })
+                }
+              >
+                {deleteBoard.isPending ? "Deleting…" : "Delete board"}
+              </button>
+            </div>
             <ErrorNotice error={move.error} />
             {filtered && !visibleCards.length && (
               <section className="results-empty">
@@ -413,8 +611,7 @@ export function BoardScreen({
                 <div>
                   <h2>A place for finished work</h2>
                   <p>
-                    Archive an idea from its details. You can restore it
-                    anytime.
+                    Archive an idea from its details to make room for restoring.
                   </p>
                 </div>
               </section>
@@ -438,11 +635,7 @@ export function BoardScreen({
               className="capture-bar"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (
-                  !busy &&
-                  capture.trim() &&
-                  board.cards.length < LIMITS.cards
-                )
+                if (!busy && capture.trim() && !captureFull)
                   createCard.mutate(capture.trim());
               }}
             >
@@ -465,16 +658,14 @@ export function BoardScreen({
               <button
                 className="primary"
                 type="submit"
-                disabled={
-                  busy || !capture.trim() || board.cards.length >= LIMITS.cards
-                }
+                disabled={busy || !capture.trim() || captureFull}
               >
                 {createCard.isPending ? "Capturing…" : "Capture idea →"}
               </button>
               <div className="capture-help">
                 <span>
-                  {board.cards.length >= LIMITS.cards
-                    ? `Your board has reached its ${LIMITS.cards}-card limit.`
+                  {captureFull
+                    ? `Your board has reached its ${LIMITS.cards}-active-card limit. Archive an idea to make room.`
                     : "Just a title is enough. The rest can come later."}
                 </span>
                 <span>
@@ -508,6 +699,71 @@ export function BoardScreen({
             )}
           </>
         ) : null}
+        {creatingBoard && (
+          <Modal
+            title="A new space for your ideas"
+            busy={createBoard.isPending}
+            onClose={() => {
+              if (
+                !createBoard.isPending &&
+                (!boardName || window.confirm("Discard this new board?"))
+              ) {
+                setCreatingBoard(false);
+                setBoardName("");
+                setBoardValidation(null);
+                createBoard.reset();
+              }
+            }}
+          >
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitBoard(creatorType);
+              }}
+            >
+              <fieldset
+                className="detail-fields"
+                disabled={createBoard.isPending}
+              >
+                <label>
+                  Board name
+                  <input
+                    value={boardName}
+                    required
+                    maxLength={LIMITS.name}
+                    placeholder="A series, a channel, a fresh start…"
+                    onChange={(event) => setBoardName(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Starting template
+                  <select
+                    value={creatorType}
+                    onChange={(event) =>
+                      setCreatorType(event.target.value as CreatorType)
+                    }
+                  >
+                    {CREATOR_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {CREATOR_OPTIONS[type].label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="muted">{TEMPLATES[creatorType].join(" → ")}</p>
+                <p className="muted">Every stage is yours to customize.</p>
+                <ErrorNotice error={boardValidation || createBoard.error} />
+                <button
+                  className="primary full"
+                  type="submit"
+                  disabled={!boardName.trim()}
+                >
+                  {createBoard.isPending ? "Creating…" : "Create board"}
+                </button>
+              </fieldset>
+            </form>
+          </Modal>
+        )}
         {undo && (
           <div className="undo-toast" role="status">
             <span>

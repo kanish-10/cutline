@@ -1,3 +1,4 @@
+import { ERROR_CODES, STAGE_COLORS } from "@cutline/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiOrigin, createMobileApi } from "./api";
 
@@ -149,5 +150,84 @@ describe("secure cookie bridge", () => {
         body: JSON.stringify({ version: 3, archived: true }),
       }),
     );
+  });
+});
+
+describe("multi-board client", () => {
+  it("fetches board summaries and deletes boards", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetcher);
+    const api = createMobileApi(origin, async () => "session=value");
+    await api.getBoards();
+    await api.deleteBoard("board-id");
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      `${origin}/api/boards`,
+      expect.objectContaining({ headers: { Cookie: "session=value" } }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      `${origin}/api/boards/board-id`,
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("scopes card and stage creation to the selected board", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetcher);
+    const api = createMobileApi(
+      origin,
+      async () => "session=value",
+      "00000000-0000-4000-8000-000000000000",
+    );
+    await api.createCard("An idea");
+    await api.createStage({
+      name: "Backlog",
+      color: STAGE_COLORS[0] ?? "#948C79",
+    });
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      `${origin}/api/cards?boardId=00000000-0000-4000-8000-000000000000`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      `${origin}/api/stages?boardId=00000000-0000-4000-8000-000000000000`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("keeps unscoped card creation for the legacy board", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetcher);
+    const api = createMobileApi(origin, async () => "session=value");
+    await api.createCard("An idea");
+    expect(fetcher).toHaveBeenCalledWith(
+      `${origin}/api/cards`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("surfaces the not-empty delete error code", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "Remove all cards first, including archived cards",
+        code: ERROR_CODES.boardNotEmpty,
+      }),
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const api = createMobileApi(origin, async () => "session=value");
+    await expect(api.deleteBoard("board-id")).rejects.toMatchObject({
+      status: 409,
+      code: ERROR_CODES.boardNotEmpty,
+    });
   });
 });

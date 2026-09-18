@@ -47,7 +47,8 @@ export function CaptureBar({
         </View>
         {full && (
           <Text style={styles.muted}>
-            Your board has reached its {LIMITS.cards}-card limit.
+            Your board has reached its {LIMITS.cards}-active-card limit. Archive
+            an idea to make room.
           </Text>
         )}
       </View>

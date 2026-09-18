@@ -3,7 +3,7 @@
 import { APP, ApiError, createApiClient, TIMING } from "@cutline/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createAuthClient } from "better-auth/react";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { UI } from "../constants";
 import { AuthScreen } from "./auth-screen";
 import { BoardScreen } from "./board-screen";
@@ -11,6 +11,7 @@ import { Brand } from "./brand";
 
 function clients(apiUrl: string) {
   return {
+    apiUrl,
     api: createApiClient(apiUrl),
     auth: createAuthClient({
       baseURL: apiUrl,
@@ -22,10 +23,21 @@ function clients(apiUrl: string) {
 
 const ClientContext = createContext<ReturnType<typeof clients> | null>(null);
 
-export function useClients() {
+export function useClients(boardId?: string) {
   const value = useContext(ClientContext);
-  if (!value) throw new Error("Missing client provider");
-  return value;
+  const scoped = useMemo(
+    () =>
+      value && {
+        ...value,
+        api:
+          boardId === undefined
+            ? value.api
+            : createApiClient(value.apiUrl, undefined, boardId),
+      },
+    [value, boardId],
+  );
+  if (!scoped) throw new Error("Missing client provider");
+  return scoped;
 }
 
 export function errorMessage(error: unknown) {
